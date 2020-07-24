@@ -16,6 +16,7 @@ type cudaAST =
   | Binop of id * cudaAST * cudaAST
   | Uniop of id * cudaAST
   | FunCall of id * cudaAST list
+  | CondExpr of cudaAST * cudaAST * cudaAST (* e1 ? e2 : e3 *)
   | If of
       (Type.t * string) * (* if式の結果を保存する変数 *)
       string * (* Temperature variable for saving the result of condition *)
@@ -78,7 +79,13 @@ let convert_from_gexpr_to_cudaAST (gexpr : Syntax.expr) (program : Module.progra
     | EAnnot (sym,_) -> (Empty, Var (sym ^ "_ATLAST"))
     | EidA (sym, index_ge) -> 
         let ge_index_pre, ge_index_post = converter index_ge in
-        (ge_index_pre, VarA (sym , ge_index_post))
+        let node_id = Hashtbl.find program.id_table sym in
+        let node = Hashtbl.find program.info_table node_id in
+        let default_value = Option.get node.default in
+        let condition = Binop("&&", Binop("<=",Const "0",ge_index_post),
+                                    Binop("<",ge_index_post, Var(string_of_int node.number))) in (* ge_index_postの計算が複数回行われている:まあCUDAコンパイラ任せでもいいか *)
+        let default_code = Const(Syntax.string_of_const default_value) in
+        (ge_index_pre, CondExpr(condition, VarA (sym , ge_index_post), default_code))
     | EAnnotA (sym, index_ge, _) ->
         let ge_index_pre, ge_index_post = converter index_ge in
         let access_sym = sym ^ "_ATLAST" in
@@ -136,6 +143,8 @@ let rec convert_cudaAST_to_code (ast : cudaAST) (indent : int) : string =
       Printf.sprintf "(%s %s %s)" (convert_cudaAST_to_code ast1 0) op (convert_cudaAST_to_code ast2 0)
   | Uniop(op, ast) -> 
       Printf.sprintf "(%s %s)" op (convert_cudaAST_to_code ast 0)
+  | CondExpr(ast1, ast2, ast3) ->
+      Printf.sprintf "(%s ? %s : %s)" (convert_cudaAST_to_code ast1 0) (convert_cudaAST_to_code ast2 0) (convert_cudaAST_to_code ast3 0)
   | FunCall(sym, asts) -> 
       Printf.sprintf "%s(%s)" sym (List.map (fun ast -> convert_cudaAST_to_code ast 0) asts |> String.concat ",")
   | If ((t,res_var), cond_var, (cond_pre, cond_post), (then_pre, then_post), (else_pre, else_post)) ->
