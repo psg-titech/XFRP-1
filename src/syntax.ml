@@ -86,7 +86,7 @@ type expr =
   | Eid of id
   | EidA of id * expr (* Node Array or GPU Node *)
   | EAnnot of id * annot
-  | EAnnotA of id * annot * expr
+  | EAnnotA of id * expr * annot
   | Ebin of binop * expr * expr
   | EUni of uniop * expr
   | EApp of id * expr list
@@ -114,7 +114,7 @@ let rec string_of_expr = function
       Printf.sprintf "EidA( %s , %s )" i (string_of_expr e)
   | EAnnot (id, an) ->
       "EAnnot(" ^ id ^ string_of_annot an ^ ")"
-  | EAnnotA (i, _, e) ->
+  | EAnnotA (i, e, _) ->
       Printf.sprintf "EAnnotA(%s, %s)" i (string_of_expr e)
   | EUni (u, e) ->
       Printf.sprintf "EUni(%s, %s)" (string_of_uniop u) (string_of_expr e)
@@ -159,7 +159,7 @@ type definition =
               int (* array size *) *
               expr option (* init *) *
               const (* default value *) *
-              gexpr (* body *)
+              expr (* body *)
   | Func of id_and_type * (id_and_type list) * expr
 
 (* | Fun  of (id * Type.t * id list * Type.t list) * expr *)
@@ -174,10 +174,10 @@ let string_of_definition = function
       ^ "\n\texpr = " ^ string_of_expr e ^ "\n}"
   | GNode (it, n, Some ie, def, e) ->
       "GNode {\n\t" ^ string_of_id_and_type it ^ " ,\n\tinit = "
-      ^ string_of_expr ie ^ "\n\texpr = " ^ string_of_gexpr e ^ "\n}"
+      ^ string_of_expr ie ^ "\n\texpr = " ^ string_of_expr e ^ "\n}"
   | GNode (it, n, None, def, e) ->
       "GNode {\n\t" ^ string_of_id_and_type it ^ " ,\n\tinit = " ^ "NONE"
-      ^ "\n\texpr = " ^ string_of_gexpr e ^ "\n}"
+      ^ "\n\texpr = " ^ string_of_expr e ^ "\n}"
   | NodeA _ ->
       "NodeA is notimplmented"
   | Func _ -> 

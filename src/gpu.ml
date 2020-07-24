@@ -20,34 +20,35 @@ let self_index_expr = "int self = blockIdx.x * blockDim.x + threadIdx.x;"
 (*    - CPU Node and its @last *)
 (*    - CPU Node array and its @last *)
 (*    - GPU Node array and its @last *)
-let collect_argument (gexpr : Syntax.gexpr) (program : Module.program) = 
+let collect_argument (gexpr : Syntax.expr) (program : Module.program) = 
   (* This function `collect_single_node` collect the single cpu node contained in the expression. *)
   (* The return value is 2-tuple. The first is the present node and the second is the @last node. *)
   let rec collect_single_node e = match e with
-    | GSelf -> (IntSet.empty, IntSet.empty)
-    | GConst _ -> (IntSet.empty, IntSet.empty)
-    | Gid symbol ->
+    | ESelf -> (IntSet.empty, IntSet.empty)
+    | EConst _ -> (IntSet.empty, IntSet.empty)
+    | Eid symbol ->
         let nodeid = Hashtbl.find program.id_table symbol in
         let first = if (IntSet.mem nodeid program.single_nodes) then IntSet.singleton nodeid else IntSet.empty in
         (first, IntSet.empty)
-    | GAnnot (symbol, _) -> 
+    | EAnnot (symbol, _) -> 
         let nodeid = Hashtbl.find program.id_table symbol in
         let second = if IntSet.mem nodeid program.single_nodes then IntSet.singleton nodeid else IntSet.empty in
         (IntSet.empty, second)
-    | GIdAt (_ , ge) -> collect_single_node ge
-    | GIdAtAnnot (_, ge, _) -> collect_single_node ge
-    | Gbin (_, ge1, ge2) ->
+    | EidA (_ , ge) -> collect_single_node ge
+    | EAnnotA (_, ge, _) -> collect_single_node ge
+    | Ebin (_, ge1, ge2) ->
         let f1, s1 = collect_single_node ge1 in
         let f2, s2 = collect_single_node ge2 in
         (IntSet.union f1 f2, IntSet.union s1 s2)
-    | GApp (_, args) -> 
+    | EUni (_, ge) -> collect_single_node ge
+    | EApp (_, args) -> 
         List.fold_left
           (fun (accf,accs) arg_ge -> 
             let f, s = collect_single_node arg_ge in
             (IntSet.union accf f, IntSet.union accs s))
           (IntSet.empty, IntSet.empty) (* accumulator *)
           args
-    | Gif (ge1, ge2, ge3) -> 
+    | Eif (ge1, ge2, ge3) -> 
         List.fold_left
           (fun (accf,accs) arg_ge -> 
             let f, s = collect_single_node arg_ge in
@@ -56,36 +57,37 @@ let collect_argument (gexpr : Syntax.gexpr) (program : Module.program) =
           [ge1; ge2; ge3]
   in
   let rec collect_node_array e = match e with
-  | GSelf -> (IntSet.empty, IntSet.empty)
-  | GConst _ -> (IntSet.empty, IntSet.empty)
-  | Gid _ -> (IntSet.empty, IntSet.empty)
-  | GAnnot _ ->  (IntSet.empty, IntSet.empty)
-  | GIdAt (symbol, ge) -> 
+  | ESelf -> (IntSet.empty, IntSet.empty)
+  | EConst _ -> (IntSet.empty, IntSet.empty)
+  | Eid _ -> (IntSet.empty, IntSet.empty)
+  | EAnnot _ ->  (IntSet.empty, IntSet.empty)
+  | EidA (symbol, ge) -> 
       let set = if (List.mem symbol program.gnode)
                   then IntSet.empty
                   else IntSet.singleton (Hashtbl.find program.id_table symbol)
       in
       let f,s = collect_node_array ge in
       (IntSet.union f set, s)
-  | GIdAtAnnot (symbol, ge, _) ->
+  | EAnnotA (symbol, ge, _) ->
       let set = if (List.mem symbol program.gnode)
                   then IntSet.empty
                   else IntSet.singleton (Hashtbl.find program.id_table symbol)
       in
       let f,s = collect_node_array ge in
       (IntSet.union f set, s)
-  | Gbin (_, ge1, ge2) -> 
+  | Ebin (_, ge1, ge2) -> 
       let f1, s1 = collect_node_array ge1 in
       let f2, s2 = collect_node_array ge2 in
       (IntSet.union f1 f2, IntSet.union s1 s2)
-  | GApp (_, args) -> 
+  | EUni (_, ge) -> collect_node_array ge
+  | EApp (_, args) -> 
       List.fold_left
         (fun (accf, accs) arg_ge -> 
           let f, s = collect_node_array arg_ge in
           (IntSet.union accf f, IntSet.union accs s))
         (IntSet.empty, IntSet.empty)
         args
-  | Gif (ge1, ge2, ge3) ->
+  | Eif (ge1, ge2, ge3) ->
       List.fold_left
         (fun (accf,accs) arg_ge -> 
           let f, s = collect_node_array arg_ge in
@@ -94,36 +96,37 @@ let collect_argument (gexpr : Syntax.gexpr) (program : Module.program) =
         [ge1; ge2; ge3]
   in
   let rec collect_gnode e = match e with
-  | GSelf -> (IntSet.empty, IntSet.empty) 
-  | GConst _ -> (IntSet.empty, IntSet.empty)
-  | Gid _ -> (IntSet.empty, IntSet.empty)
-  | GAnnot _ -> (IntSet.empty, IntSet.empty)
-  | GIdAt (symbol, ge) -> 
+  | ESelf -> (IntSet.empty, IntSet.empty) 
+  | EConst _ -> (IntSet.empty, IntSet.empty)
+  | Eid _ -> (IntSet.empty, IntSet.empty)
+  | EAnnot _ -> (IntSet.empty, IntSet.empty)
+  | EidA (symbol, ge) -> 
       let set = if (List.mem symbol program.gnode)
                   then IntSet.singleton (Hashtbl.find program.id_table symbol)
                   else IntSet.empty
       in
       let f,s = collect_node_array ge in
       (IntSet.union f set, s)
-  | GIdAtAnnot (symbol, ge, _) ->
+  | EAnnotA (symbol, ge, _) ->
       let set = if (List.mem symbol program.gnode)
                   then  IntSet.singleton (Hashtbl.find program.id_table symbol)
                   else IntSet.empty
       in
       let f,s = collect_node_array ge in
       (IntSet.union f set, s)
-  | Gbin (_, ge1, ge2) -> 
+  | Ebin (_, ge1, ge2) -> 
       let f1, s1 = collect_gnode ge1 in
       let f2, s2 = collect_gnode ge2 in
       (IntSet.union f1 f2, IntSet.union s1 s2)
-  | GApp (_, args) -> 
+  | EUni (_, ge) -> collect_gnode ge
+  | EApp (_, args) -> 
       List.fold_left
         (fun (accf, accs) arg_ge -> 
           let f, s = collect_gnode arg_ge in
           (IntSet.union accf f, IntSet.union accs s))
         (IntSet.empty, IntSet.empty)
         args
-  | Gif (ge1, ge2, ge3) ->
+  | Eif (ge1, ge2, ge3) ->
       List.fold_left
         (fun (accf,accs) arg_ge -> 
           let f, s = collect_gnode arg_ge in
@@ -218,7 +221,7 @@ let generate_kernel_head (name : string) (program : Module.program)
 
 (* Generate the cuda kernel for updating the gpu node. *)
 (* The argument `head` is the first line of the definition of kernel *)
-let generate_gnode_update_kernel (name : string) (gexpr : Syntax.gexpr) (ast : Syntax.ast) (program : Module.program) (head: string) : string =
+let generate_gnode_update_kernel (name : string) (gexpr : Syntax.expr) (ast : Syntax.ast) (program : Module.program) (head: string) : string =
   let kernel_name = head in
   let self_index_expr = "\tint self = blockIdx.x * blockDim.x + threadIdx.x;" in
   let self_restriction = Printf.sprintf "\tif(self < %d){" (let id = Hashtbl.find program.id_table name in let info = Hashtbl.find program.info_table id in info.number ) in
@@ -232,7 +235,7 @@ let generate_gnode_update_kernel (name : string) (gexpr : Syntax.gexpr) (ast : S
 (* Return the update function of gpu node array. *)
 (* For the gpu node array `x`, this function reaturns the function `x_update()`. *)
 (* transfer_host_set : The set of gpu node which is required to transfer the data from device to host. *)
-let generate_gpu_node_array_update (name : string) (gexpr : Syntax.gexpr) (ast : Syntax.ast) (program : Module.program) (transer_host_set : IntSet.t) :string = 
+let generate_gpu_node_array_update (name : string) (gexpr : Syntax.expr) (ast : Syntax.ast) (program : Module.program) (transer_host_set : IntSet.t) :string = 
   let gnodid = Hashtbl.find program.id_table name in
   let info = Hashtbl.find program.info_table gnodid in
   (* Declaration of update function that is called from CPU. *)

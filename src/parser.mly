@@ -69,7 +69,7 @@ definition :
       init = option(INIT LBRACKET ie = init_expr RBRACKET {ie})
       id = ID AT num = node_number WITH DEFAULT LPAREN c = constant RPAREN (* TODO : numをINT以外を取れるようにする *)
       COLON t = type_specific
-        EQUAL ge = gexpr
+        EQUAL ge = expr (* gexprに分ける意味がわからない *)
       {
         GNode((id,t), num, init, c, ge)
       }
@@ -88,10 +88,18 @@ expr :
   | SELF            { ESelf }
   | constant        { EConst($1) }
   | MINUS expr %prec prec_uni { EUni(UNeg,$2) }
-  | id = ID         { Eid(id) }
-  | id = ID LBRACKET e = expr RBRACKET { EidA(id,e) }
-  | id = ID AT a = annotation { EAnnot(id,a) }
-  | id = ID AT a = annotation LBRACKET e = expr RBRACKET { EAnnotA(id,a,e) }
+  | id = ID annot = option(AT a = annotation {a})
+  { match annot with
+    | None -> Eid(id)
+    | Some a -> EAnnot(id, a)
+  }
+  | id = ID LBRACKET e = expr RBRACKET annot = option(AT a = annotation {a})
+  { match annot with
+    | None -> EidA(id,e)
+    | Some a -> EAnnotA(id,e,a)
+  }
+(*  | id = ID AT a = annotation { EAnnot(id,a) } *)
+(*)  | id = ID AT a = annotation LBRACKET e = expr RBRACKET { EAnnotA(id,a,e) } *)
   | id = ID LPAREN args = separated_list(COMMA,expr) RPAREN { EApp(id,args)}
   | expr binop expr { Ebin($2,$1,$3) }
   | LPAREN expr RPAREN { $2 }

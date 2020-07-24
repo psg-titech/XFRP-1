@@ -81,9 +81,9 @@ let construct_graph (ast : Syntax.ast) (program : Module.program) : (int,IntSet.
       | NodeA ((node, t), _, _, e, _) ->
           let id = Hashtbl.find program.id_table node in
           Hashtbl.add ptbl id (collect_nodeid e)
-      | GNode ((nodename,t), _, _, _, ge) -> 
+      | GNode ((nodename,t), _, _, _, e) -> 
           let id = Hashtbl.find program.id_table nodename in
-          Hashtbl.add ptbl id (collect_gnodeid ge)
+          Hashtbl.add ptbl id (collect_nodeid e)
       | Func _ -> ()
     ) ast.definitions ;
 

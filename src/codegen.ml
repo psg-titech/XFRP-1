@@ -203,7 +203,7 @@ let rec expr_to_clang (e : expr) (program : Module.program) : c_ast * c_ast =(*{
       (CodeList [index_pre; check_index_code], Variable(result_variable))
   | EAnnot (id, annot) ->
       (Empty, Variable (id ^ "[turn^1]"))
-  | EAnnotA (i, _, indexe) ->
+  | EAnnotA (i, indexe, _) ->
       let pre, post = expr_to_clang indexe program in
       (pre, VariableA (Printf.sprintf "%s[turn^1]" i, post))
   | Ebin (op, e1, e2) ->
@@ -661,15 +661,15 @@ let code_of_ast (ast:Syntax.ast) (prg:Module.program) (thread:int) : string =(*{
   let require_host_to_device_node =  (* The set of node array accessed from gpu node *)
     let rec traverse_gexpr gexpr = (*{{{*)
       match gexpr with
-      | GIdAt (sym, g) | GIdAtAnnot(sym,g,_) ->
+      | EidA (sym, g) | EAnnotA(sym,g,_) ->
           let id = Hashtbl.find prg.id_table sym in
           let set = if IntSet.mem id prg.node_arrays then IntSet.singleton id else IntSet.empty in
           IntSet.union set (traverse_gexpr g)
-      | Gbin (_, g1,g2) -> 
+      | Ebin (_, g1,g2) -> 
           IntSet.union (traverse_gexpr g1) (traverse_gexpr g2)
-      | GApp (_, args) -> 
+      | EApp (_, args) -> 
           List.fold_left (fun acc g -> IntSet.union acc (traverse_gexpr g)) IntSet.empty args
-      | Gif (cond1, cond2, cond3) ->
+      | Eif (cond1, cond2, cond3) ->
           List.fold_left (fun acc g -> IntSet.union acc (traverse_gexpr g)) IntSet.empty [cond1; cond2; cond3]
       | _ -> IntSet.empty
     in
@@ -685,7 +685,7 @@ let code_of_ast (ast:Syntax.ast) (prg:Module.program) (thread:int) : string =(*{
   let gpunodes_accessed_by_cpunode : IntSet.t =
     let rec traverse_expr expr : IntSet.t = (*{{{*)
       match expr with
-      | EidA (sym, index_e) | EAnnotA (sym, _, index_e) -> 
+      | EidA (sym, index_e) | EAnnotA (sym, index_e, _) -> 
           let id = Hashtbl.find prg.id_table sym in
           let set1 = if List.mem sym prg.gnode then IntSet.singleton id else IntSet.empty in
           IntSet.union set1 (traverse_expr index_e)
@@ -732,7 +732,7 @@ let code_of_ast (ast:Syntax.ast) (prg:Module.program) (thread:int) : string =(*{
     List.filter_map
       (function
         | GNode ((i, t), _, _, _, e) ->
-            Some (Gpu.generate_gpu_node_array_update i e ast prg gpunodes_accessed_by_cpunode)
+            Some (Gpu.generate_gpu_node_array_update i e ast prg gpunodes_accessed_by_cpunode) (* TODO: dummyです *)
         | _ ->
             None)
       ast.definitions

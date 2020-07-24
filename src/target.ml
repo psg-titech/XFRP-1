@@ -14,6 +14,7 @@ type cudaAST =
   | VarDec of Type.t * string (* 変数宣言 *)
   | Assignment of Type.t option * string * cudaAST
   | Binop of id * cudaAST * cudaAST
+  | Uniop of id * cudaAST
   | FunCall of id * cudaAST list
   | If of
       (Type.t * string) * (* if式の結果を保存する変数 *)
@@ -24,34 +25,36 @@ type cudaAST =
   | CodeSeq of cudaAST list
 
 
-let rec get_gexpr_type (gexpr : Syntax.gexpr) (program : Module.program) : Type.t = 
+let rec get_gexpr_type (gexpr : Syntax.expr) (program : Module.program) : Type.t = 
   match gexpr with 
-  | GSelf -> Type.TInt
-  | GConst c -> Syntax.type_of_const c
-  | Gid sym -> 
+  | ESelf -> Type.TInt
+  | EConst c -> Syntax.type_of_const c
+  | Eid sym -> 
       let id = Hashtbl.find program.id_table sym in
       let info = Hashtbl.find program.info_table id in
       info.t
-  | GAnnot (sym,_) -> 
+  | EAnnot (sym,_) -> 
       let id = Hashtbl.find program.id_table sym in
       let info = Hashtbl.find program.info_table id in
       info.t
-  | GIdAt (sym, e) -> 
+  | EidA (sym, e) -> 
       let id = Hashtbl.find program.id_table sym in
       let info = Hashtbl.find program.info_table id in
       info.t
-  | GIdAtAnnot (sym, _ , _) -> 
+  | EAnnotA (sym, _ , _) -> 
       let id = Hashtbl.find program.id_table sym in
       let info = Hashtbl.find program.info_table id in
       info.t
-  | Gbin (op, e1, e2) -> 
+  | Ebin (op, e1, e2) -> 
     (match op with 
       | BEq |BOr |BLte |BLt |BRte |BRt -> Type.TBool
       | _ -> Type.union_type (get_gexpr_type e1 program) (get_gexpr_type e2 program))
-  | GApp (fsym, _) ->
+  | EUni (op, e) ->
+    Type.union_type Type.TInt (get_gexpr_type e program) (* TODO : opが一意なのでbinより弱いが、binも全然やってないのが丸わかり *)
+  | EApp (fsym, _) ->
       let t = Hashtbl.find program.func_table fsym in
       t
-  | Gif (_, ge1, ge2) -> 
+  | Eif (_, ge1, ge2) -> 
       let t1 = get_gexpr_type ge1 program in
       let t2 = get_gexpr_type ge2 program in
       if t1 = t2 then t1
@@ -60,7 +63,7 @@ let rec get_gexpr_type (gexpr : Syntax.gexpr) (program : Module.program) : Type.
 
 (* Convert from gexpr to cudaAST *)
 (* This function is almost same as the function that convert from expr to cAST *)
-let convert_from_gexpr_to_cudaAST (gexpr : Syntax.gexpr) (program : Module.program) : cudaAST * cudaAST = 
+let convert_from_gexpr_to_cudaAST (gexpr : Syntax.expr) (program : Module.program) : cudaAST * cudaAST = 
   let current_index = ref 0 in
   let get_unique_variable () : string = 
     let id = string_of_int !current_index in
@@ -69,18 +72,18 @@ let convert_from_gexpr_to_cudaAST (gexpr : Syntax.gexpr) (program : Module.progr
   in
   let rec converter gexpr = 
     match gexpr with 
-    | GSelf -> (Empty, Var "self")
-    | GConst c -> (Empty, Const (Syntax.string_of_const c))
-    | Gid i -> (Empty, Var i)
-    | GAnnot (sym,_) -> (Empty, Var (sym ^ "_ATLAST"))
-    | GIdAt (sym, index_ge) -> 
+    | ESelf -> (Empty, Var "self")
+    | EConst c -> (Empty, Const (Syntax.string_of_const c))
+    | Eid i -> (Empty, Var i)
+    | EAnnot (sym,_) -> (Empty, Var (sym ^ "_ATLAST"))
+    | EidA (sym, index_ge) -> 
         let ge_index_pre, ge_index_post = converter index_ge in
         (ge_index_pre, VarA (sym , ge_index_post))
-    | GIdAtAnnot (sym, index_ge, _) ->
+    | EAnnotA (sym, index_ge, _) ->
         let ge_index_pre, ge_index_post = converter index_ge in
         let access_sym = sym ^ "_ATLAST" in
         (ge_index_pre, VarA ( access_sym , ge_index_post))
-    | Gbin(op, ge1, ge2) -> 
+    | Ebin(op, ge1, ge2) -> 
         let op_sym = Syntax.string_of_binop op in
         let pre1, post1 = converter ge1 in
         let pre2, post2 = converter ge2 in
@@ -91,12 +94,16 @@ let convert_from_gexpr_to_cudaAST (gexpr : Syntax.gexpr) (program : Module.progr
                   | (p1, p2) -> CodeSeq [p1; p2]
         in
         (pre, Binop(op_sym, post1, post2))
-    | GApp (fun_sym, args) -> 
+    | EUni(op, ge) ->
+        let op_sym = Syntax.string_of_uniop op in
+        let pre, post = converter ge in
+        (pre, Uniop(op_sym, post))
+    | EApp (fun_sym, args) -> 
         let args_cudaAST = List.map converter args in
         let args_pre = List.map fst args_cudaAST in
         let args_post = List.map snd args_cudaAST in
         (CodeSeq args_pre, FunCall(fun_sym, args_post))
-    | Gif (ge_cond, ge_then, ge_else) ->
+    | Eif (ge_cond, ge_then, ge_else) ->
         let res_var = get_unique_variable () in
         let cond_var = get_unique_variable () in
         let then_type = get_gexpr_type ge_then program in
@@ -127,6 +134,8 @@ let rec convert_cudaAST_to_code (ast : cudaAST) (indent : int) : string =
       Printf.sprintf "%s%s = %s;" tab var (convert_cudaAST_to_code a 0)
   | Binop(op, ast1, ast2) -> 
       Printf.sprintf "(%s %s %s)" (convert_cudaAST_to_code ast1 0) op (convert_cudaAST_to_code ast2 0)
+  | Uniop(op, ast) -> 
+      Printf.sprintf "(%s %s)" op (convert_cudaAST_to_code ast 0)
   | FunCall(sym, asts) -> 
       Printf.sprintf "%s(%s)" sym (List.map (fun ast -> convert_cudaAST_to_code ast 0) asts |> String.concat ",")
   | If ((t,res_var), cond_var, (cond_pre, cond_post), (then_pre, then_post), (else_pre, else_post)) ->
