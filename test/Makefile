@@ -1,2 +1,2 @@
 all:
-	nvcc -I/usr/local/cuda/samples/common/inc grayscale.cu `pkg-config --cflags --libs opencv4`
+	nvcc -I/usr/local/cuda/samples/common/inc -DXFRP_ON_PTHREAD grayscale.cu `pkg-config --cflags --libs opencv4`
