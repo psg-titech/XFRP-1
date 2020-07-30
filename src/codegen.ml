@@ -134,17 +134,17 @@ let rec get_xfrp_expr_type (e : expr) (program : Module.program) : Type.t = (*{{
         let id = Hashtbl.find program.id_table name in
         let node = Hashtbl.find program.info_table id in
         node.t
-    | EidA (name,_) -> 
+    | EidA (name,_,d) -> 
         let id = Hashtbl.find program.id_table name in
-        let node = Hashtbl.find program.info_table id in
+        let node = Hashtbl.find program.info_table id in (* TODO : dの型との対応確認 *)
         node.t
     | EAnnot (name,_) -> 
         let id = Hashtbl.find program.id_table name in
         let node = Hashtbl.find program.info_table id in
         node.t
-    | EAnnotA (name,_,_) -> 
+    | EAnnotA (name,_,_,d) -> 
         let id = Hashtbl.find program.id_table name in
-        let node = Hashtbl.find program.info_table id in
+        let node = Hashtbl.find program.info_table id in (* TODO : dの型との対応確認 *)
         node.t
     | EUni _ -> TInt
     | Ebin (op,e1,e2) -> 
@@ -180,7 +180,7 @@ let rec expr_to_clang (e : expr) (program : Module.program) : c_ast * c_ast =(*{
       (Empty, Const (Syntax.string_of_const e))
   | Eid i ->
       (Empty, Variable (i ^ "[turn]"))
-  | EidA (i, e) -> (* e:添字 *)
+  | EidA (i, e, d) -> (* e:添字 *)
       let index_pre, index_post = expr_to_clang e program in
       let node_id = Hashtbl.find program.id_table i in
       let node = Hashtbl.find program.info_table node_id in
@@ -195,17 +195,21 @@ let rec expr_to_clang (e : expr) (program : Module.program) : c_ast * c_ast =(*{
        * }
        * <post> := tmp
        *)
-      let default_value = Option.get node.default in
+      let default_code = Option.get node.default in
+      let default_value =
+        match d with
+        | None -> Const(Syntax.string_of_const default_code)
+        | Some d -> snd (expr_to_clang d program) in (* TODO : fstは空のはず *)
       let check_index_code = If((node.t,result_variable),
                                 (Empty, Binop("<",index_post, Variable(string_of_int node.number))),
                                 (Empty, VariableA(Printf.sprintf "%s[turn]" i, index_post)),
-                                (Empty,Const(Syntax.string_of_const default_value))) in
+                                (Empty, default_value)) in
       (CodeList [index_pre; check_index_code], Variable(result_variable))
   | EAnnot (id, annot) ->
       (Empty, Variable (id ^ "[turn^1]"))
-  | EAnnotA (i, indexe, _) ->
+  | EAnnotA (i, indexe, _, d) ->
       let pre, post = expr_to_clang indexe program in
-      (pre, VariableA (Printf.sprintf "%s[turn^1]" i, post))
+      (pre, VariableA (Printf.sprintf "%s[turn^1]" i, post)) (* TODO : default valueの処理がない *)
   | Ebin (op, e1, e2) ->
       let op_symbol = string_of_binop op in
       let pre1, cur1 = expr_to_clang e1 program in
@@ -255,11 +259,11 @@ let rec expr_to_clang_of_func (e : expr) (program : Module.program) : c_ast * c_
       (Empty, Const (Syntax.string_of_const e))
   | Eid i ->
       (Empty, Variable(i))
-  | EidA (i, e) -> (* e:添字 *)
+  | EidA (i, e, d) -> (* e:添字 *)
       raise (Unreachable "In function EidA is not used")
   | EAnnot (id, annot) ->
       raise (Unreachable "In function EAnnot is not used")
-  | EAnnotA (i, _, indexe) ->
+  | EAnnotA (i, _, indexe, d) ->
       raise (Unreachable "In function EAnnotA is not used")
   | Ebin (op, e1, e2) ->
       let op_symbol = string_of_binop op in
@@ -661,9 +665,13 @@ let code_of_ast (ast:Syntax.ast) (prg:Module.program) (thread:int) : string =(*{
   let require_host_to_device_node =  (* The set of node array accessed from gpu node *)
     let rec traverse_gexpr gexpr = (*{{{*)
       match gexpr with
-      | EidA (sym, g) | EAnnotA(sym,g,_) ->
+      | EidA (sym, g, d) | EAnnotA(sym, g, _, d) ->
           let id = Hashtbl.find prg.id_table sym in
           let set = if IntSet.mem id prg.node_arrays then IntSet.singleton id else IntSet.empty in
+          let set =
+            match d with
+            | None -> set
+            | Some d -> IntSet.union set (traverse_gexpr d) in
           IntSet.union set (traverse_gexpr g)
       | Ebin (_, g1,g2) -> 
           IntSet.union (traverse_gexpr g1) (traverse_gexpr g2)
@@ -685,9 +693,13 @@ let code_of_ast (ast:Syntax.ast) (prg:Module.program) (thread:int) : string =(*{
   let gpunodes_accessed_by_cpunode : IntSet.t =
     let rec traverse_expr expr : IntSet.t = (*{{{*)
       match expr with
-      | EidA (sym, index_e) | EAnnotA (sym, index_e, _) -> 
+      | EidA (sym, index_e, d) | EAnnotA (sym, index_e, _, d) -> 
           let id = Hashtbl.find prg.id_table sym in
           let set1 = if List.mem sym prg.gnode then IntSet.singleton id else IntSet.empty in
+          let set1 =
+            match d with
+            | None -> set1
+            | Some d -> IntSet.union set1 (traverse_expr d) in
           IntSet.union set1 (traverse_expr index_e)
       | Ebin(_, e1, e2) ->
           IntSet.union (traverse_expr e1) (traverse_expr e2)

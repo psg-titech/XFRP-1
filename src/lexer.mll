@@ -44,6 +44,7 @@ rule read = parse
   | '>'               { RT }
   | '<'               { LT }
   | '@'               { AT }
+  | '?'               { QUESTION }
   | "module"          { MODULE }
   | "in"              { IN }
   | "out"             { OUT }

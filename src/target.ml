@@ -38,11 +38,11 @@ let rec get_gexpr_type (gexpr : Syntax.expr) (program : Module.program) : Type.t
       let id = Hashtbl.find program.id_table sym in
       let info = Hashtbl.find program.info_table id in
       info.t
-  | EidA (sym, e) -> 
+  | EidA (sym, e, d) -> 
       let id = Hashtbl.find program.id_table sym in
       let info = Hashtbl.find program.info_table id in
       info.t
-  | EAnnotA (sym, _ , _) -> 
+  | EAnnotA (sym, _ , _, d) -> 
       let id = Hashtbl.find program.id_table sym in
       let info = Hashtbl.find program.info_table id in
       info.t
@@ -77,19 +77,27 @@ let convert_from_gexpr_to_cudaAST (gexpr : Syntax.expr) (program : Module.progra
     | EConst c -> (Empty, Const (Syntax.string_of_const c))
     | Eid i -> (Empty, Var i)
     | EAnnot (sym,_) -> (Empty, Var (sym ^ "_ATLAST"))
-    | EidA (sym, index_ge) -> 
+    | EidA (sym, index_ge, d) -> 
         let ge_index_pre, ge_index_post = converter index_ge in
         let node_id = Hashtbl.find program.id_table sym in
         let node = Hashtbl.find program.info_table node_id in
-        let default_value = Option.get node.default in
         let condition = Binop("&&", Binop("<=",Const "0",ge_index_post),
                                     Binop("<",ge_index_post, Var(string_of_int node.number))) in (* ge_index_postの計算が複数回行われている:まあCUDAコンパイラ任せでもいいか *)
-        let default_code = Const(Syntax.string_of_const default_value) in
+        let default_code = match d with
+                           | None -> Const (Syntax.string_of_const (Option.get node.default))
+                           | Some d -> snd (converter d) in (* TODO : fst (converter d)はemptyのはず *)
         (ge_index_pre, CondExpr(condition, VarA (sym , ge_index_post), default_code))
-    | EAnnotA (sym, index_ge, _) ->
+    | EAnnotA (sym, index_ge, _, d) ->
         let ge_index_pre, ge_index_post = converter index_ge in
         let access_sym = sym ^ "_ATLAST" in
-        (ge_index_pre, VarA ( access_sym , ge_index_post))
+        let node_id = Hashtbl.find program.id_table sym in
+        let node = Hashtbl.find program.info_table node_id in
+        let condition = Binop("&&", Binop("<=",Const "0",ge_index_post),
+                                    Binop("<",ge_index_post, Var(string_of_int node.number))) in (* ge_index_postの計算が複数回行われている:まあCUDAコンパイラ任せでもいいか *)
+        let default_code = match d with
+                           | None -> Const (Syntax.string_of_const (Option.get node.default))
+                           | Some d -> snd (converter d) in (* TODO : fst (converter d)はemptyのはず *)
+        (ge_index_pre, CondExpr(condition, VarA (access_sym , ge_index_post), default_code))
     | Ebin(op, ge1, ge2) -> 
         let op_sym = Syntax.string_of_binop op in
         let pre1, post1 = converter ge1 in

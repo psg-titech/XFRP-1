@@ -84,9 +84,9 @@ type expr =
   | ESelf
   | EConst of const
   | Eid of id
-  | EidA of id * expr (* Node Array or GPU Node *)
+  | EidA of id * expr * expr option (* Node Array or GPU Node *)
   | EAnnot of id * annot
-  | EAnnotA of id * expr * annot
+  | EAnnotA of id * expr * annot * expr option
   | Ebin of binop * expr * expr
   | EUni of uniop * expr
   | EApp of id * expr list
@@ -110,12 +110,18 @@ let rec string_of_expr = function
       "EConst( " ^ string_of_const c ^ " )"
   | Eid i ->
       "Eid( " ^ i ^ ")"
-  | EidA (i, e) ->
+  | EidA (i, e, d) ->
       Printf.sprintf "EidA( %s , %s )" i (string_of_expr e)
+      ^ (match d with
+         | None -> ""
+         | Some d -> "?" ^ string_of_expr d)
   | EAnnot (id, an) ->
       "EAnnot(" ^ id ^ string_of_annot an ^ ")"
-  | EAnnotA (i, e, _) ->
+  | EAnnotA (i, e, _, d) ->
       Printf.sprintf "EAnnotA(%s, %s)" i (string_of_expr e)
+      ^ (match d with
+        | None -> ""
+        | Some d -> "?" ^ string_of_expr d)
   | EUni (u, e) ->
       Printf.sprintf "EUni(%s, %s)" (string_of_uniop u) (string_of_expr e)
   | Ebin (op, e1, e2) ->
