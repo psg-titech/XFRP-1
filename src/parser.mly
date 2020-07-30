@@ -93,7 +93,7 @@ expr :
     | None -> Eid(id)
     | Some a -> EAnnot(id, a)
   }
-  | id = ID LBRACKET e = expr RBRACKET annot = option(AT a = annotation {a}) d = option(QUESTION d = expr {d})
+  | id = ID LBRACKET e = expr RBRACKET annot = option(AT a = annotation {a}) d = option(QUESTION d = dexpr {d})
   { match annot with
     | None -> EidA(id,e,d)
     | Some a -> EAnnotA(id,e,a,d)
@@ -104,6 +104,20 @@ expr :
   | expr binop expr { Ebin($2,$1,$3) }
   | LPAREN expr RPAREN { $2 }
   | IF cond = expr THEN e1 = expr ELSE e2 = expr %prec prec_if { Eif(cond,e1,e2) } (* %prec prec_if down the priority of if statement *)
+
+(* expression allowed in default access value *)
+dexpr :
+  | constant       { EConst($1) }
+  | id = ID annot = option(AT a = annotation {a})
+  { match annot with
+    | None -> Eid(id)
+    | Some a -> EAnnot(id, a)
+  }
+  | id = ID LBRACKET c = node_number RBRACKET annot = option(AT a = annotation {a})
+  { match annot with
+    | None -> EUnsafeidA(id,EConst(CInt(c)))
+    | Some a -> EUnsafeAnnotA(id,EConst(CInt(c)),a)
+  }
 
 (* ---------- Initialize Node value -------------------- *)
 (* restricted expression for initialize the node value *)
