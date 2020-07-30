@@ -57,28 +57,6 @@ let construct_graph (ast : Syntax.ast) (program : Module.program) : (int,IntSet.
         IntSet.union (collect_nodeid cond)
           (IntSet.union (collect_nodeid e1) (collect_nodeid e2))
   in
-  let rec collect_gnodeid gexpr = 
-    match gexpr with
-    | GSelf -> IntSet.empty
-    | GConst _ -> IntSet.empty
-    (* CPUノード *)
-    | Gid nodename ->
-        if List.mem nodename program.input then IntSet.empty
-        else Hashtbl.find program.id_table nodename|> IntSet.singleton
-    (* CPUノード+@last *)
-    | GAnnot _ -> IntSet.empty
-    (* ノード配列に対する参照 *)
-    | GIdAt (nodesymbol, ge_index) -> 
-        let id =
-          if (List.mem nodesymbol program.input) then IntSet.empty
-            else Hashtbl.find program.id_table nodesymbol |> IntSet.singleton in
-        let index_set = collect_gnodeid ge_index in
-        IntSet.union id index_set
-    | GIdAtAnnot _ -> IntSet.empty
-    | Gbin (op, ge1, ge2) -> IntSet.union (collect_gnodeid ge1) (collect_gnodeid ge2)
-    | GApp (funname, args) -> List.fold_left (fun acc ge -> IntSet.union acc (collect_gnodeid ge)) IntSet.empty args
-    | Gif (ge_if, ge_then, ge_else) -> IntSet.union (collect_gnodeid ge_if) (IntSet.union (collect_gnodeid ge_then) (collect_gnodeid ge_else))
-  in
 
   (* ptbl(親ノードの隣接リスト)を構築 *)
   List.iter
