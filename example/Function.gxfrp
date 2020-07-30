@@ -1,0 +1,13 @@
+module Function
+in inary@500 with default(0) : Int,
+   bias : Int
+out outary@1000 : Int
+
+node widen@1024 with default(1) : Int = inary[self/2] + 1
+
+node init[0] first : Int = (first@last + bias)/2
+
+gnode calc@1023 with default(0) : Int = (widen[self] + widen[self+1]@last?bias) + (first + first@last)
+
+node outary@1000 with default(0) : Int = calc[self]
+
