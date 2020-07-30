@@ -41,10 +41,21 @@ let construct_graph (ast : Syntax.ast) (program : Module.program) : (int,IntSet.
           | None -> set1
           | Some d -> IntSet.union set1 (collect_nodeid d) in
         IntSet.union set1 index_set
-    | EAnnotA (_, _, _, d) ->
-        (match d with
-         | None -> IntSet.empty
-         | Some d -> collect_nodeid d)
+    | EAnnotA (_, e, _, d) ->
+        let index_set = collect_nodeid e in
+        let set1 = (match d with
+                    | None -> IntSet.empty
+                    | Some d -> collect_nodeid d) in
+        IntSet.union set1 index_set
+    | EUnsafeidA (i, e) ->
+        let index_set = collect_nodeid e in
+        let set1 =
+          if List.mem i program.input
+            then IntSet.empty
+            else let id1 = Hashtbl.find program.id_table i in IntSet.singleton id1
+        in
+        IntSet.union set1 index_set
+    | EUnsafeAnnotA (_, e, _) -> collect_nodeid e
     | Ebin (_, e1, e2) ->
         IntSet.union (collect_nodeid e1) (collect_nodeid e2)
     | EUni (_, e) ->

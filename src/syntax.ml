@@ -85,8 +85,10 @@ type expr =
   | EConst of const
   | Eid of id
   | EidA of id * expr * expr option (* Node Array or GPU Node *)
+  | EUnsafeidA of id * expr (* Array access without boundary check *)
   | EAnnot of id * annot
   | EAnnotA of id * expr * annot * expr option
+  | EUnsafeAnnotA of id * expr * annot
   | Ebin of binop * expr * expr
   | EUni of uniop * expr
   | EApp of id * expr list
@@ -104,6 +106,8 @@ let rec string_of_expr = function
       ^ (match d with
          | None -> ""
          | Some d -> "?" ^ string_of_expr d)
+  | EUnsafeidA (i, e) ->
+      Printf.sprintf "EunsafeidA( %s , %s )" i (string_of_expr e)
   | EAnnot (id, an) ->
       "EAnnot(" ^ id ^ string_of_annot an ^ ")"
   | EAnnotA (i, e, _, d) ->
@@ -111,6 +115,8 @@ let rec string_of_expr = function
       ^ (match d with
         | None -> ""
         | Some d -> "?" ^ string_of_expr d)
+  | EUnsafeAnnotA (i, e, _) ->
+      Printf.sprintf "EUnsafeAnnotA(%s, %s)" i (string_of_expr e)
   | EUni (u, e) ->
       Printf.sprintf "EUni(%s, %s)" (string_of_uniop u) (string_of_expr e)
   | Ebin (op, e1, e2) ->

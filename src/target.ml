@@ -30,19 +30,15 @@ let rec get_gexpr_type (gexpr : Syntax.expr) (program : Module.program) : Type.t
   match gexpr with 
   | ESelf -> Type.TInt
   | EConst c -> Syntax.type_of_const c
-  | Eid sym -> 
+  | Eid sym | EAnnot (sym,_) -> 
       let id = Hashtbl.find program.id_table sym in
       let info = Hashtbl.find program.info_table id in
       info.t
-  | EAnnot (sym,_) -> 
+  | EidA (sym, e, d) | EAnnotA (sym, e , _, d) -> 
       let id = Hashtbl.find program.id_table sym in
       let info = Hashtbl.find program.info_table id in
       info.t
-  | EidA (sym, e, d) -> 
-      let id = Hashtbl.find program.id_table sym in
-      let info = Hashtbl.find program.info_table id in
-      info.t
-  | EAnnotA (sym, _ , _, d) -> 
+  | EUnsafeidA (sym, e) | EUnsafeAnnotA (sym, e, _) ->
       let id = Hashtbl.find program.id_table sym in
       let info = Hashtbl.find program.info_table id in
       info.t
@@ -98,6 +94,13 @@ let convert_from_gexpr_to_cudaAST (gexpr : Syntax.expr) (program : Module.progra
                            | None -> Const (Syntax.string_of_const (Option.get node.default))
                            | Some d -> snd (converter d) in (* TODO : fst (converter d)はemptyのはず *)
         (ge_index_pre, CondExpr(condition, VarA (access_sym , ge_index_post), default_code))
+    | EUnsafeidA (sym, index_ge) ->
+        let ge_index_pre, ge_index_post = converter index_ge in
+        (ge_index_pre, VarA(sym, ge_index_post))
+    | EUnsafeAnnotA (sym, index_ge, _) ->
+        let ge_index_pre, ge_index_post = converter index_ge in
+        let access_sym = sym ^ "_ATLAST" in
+        (ge_index_pre, VarA (access_sym, ge_index_post))
     | Ebin(op, ge1, ge2) -> 
         let op_sym = Syntax.string_of_binop op in
         let pre1, post1 = converter ge1 in

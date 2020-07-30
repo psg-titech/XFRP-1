@@ -138,6 +138,10 @@ let rec get_xfrp_expr_type (e : expr) (program : Module.program) : Type.t = (*{{
         let id = Hashtbl.find program.id_table name in
         let node = Hashtbl.find program.info_table id in (* TODO : dの型との対応確認 *)
         node.t
+    | EUnsafeidA (name,_) -> 
+        let id = Hashtbl.find program.id_table name in
+        let node = Hashtbl.find program.info_table id in
+        node.t
     | EAnnot (name,_) -> 
         let id = Hashtbl.find program.id_table name in
         let node = Hashtbl.find program.info_table id in
@@ -145,6 +149,10 @@ let rec get_xfrp_expr_type (e : expr) (program : Module.program) : Type.t = (*{{
     | EAnnotA (name,_,_,d) -> 
         let id = Hashtbl.find program.id_table name in
         let node = Hashtbl.find program.info_table id in (* TODO : dの型との対応確認 *)
+        node.t
+    | EUnsafeAnnotA (name,_,_) -> 
+        let id = Hashtbl.find program.id_table name in
+        let node = Hashtbl.find program.info_table id in
         node.t
     | EUni _ -> TInt
     | Ebin (op,e1,e2) -> 
@@ -201,15 +209,21 @@ let rec expr_to_clang (e : expr) (program : Module.program) : c_ast * c_ast =(*{
         | None -> Const(Syntax.string_of_const default_code)
         | Some d -> snd (expr_to_clang d program) in (* TODO : fstは空のはず *)
       let check_index_code = If((node.t,result_variable),
-                                (Empty, Binop("<",index_post, Variable(string_of_int node.number))),
+                                (Empty, Binop("<",index_post, Variable(string_of_int node.number))), (* TODO : 0以上のチェック不足 *)
                                 (Empty, VariableA(Printf.sprintf "%s[turn]" i, index_post)),
                                 (Empty, default_value)) in
       (CodeList [index_pre; check_index_code], Variable(result_variable))
+  | EUnsafeidA (i, e) -> (* e:添字 *)
+      let index_pre, index_post = expr_to_clang e program in
+      (index_pre, VariableA(Printf.sprintf "%s[turn]" i, index_post))
   | EAnnot (id, annot) ->
       (Empty, Variable (id ^ "[turn^1]"))
   | EAnnotA (i, indexe, _, d) ->
       let pre, post = expr_to_clang indexe program in
       (pre, VariableA (Printf.sprintf "%s[turn^1]" i, post)) (* TODO : default valueの処理がない *)
+  | EUnsafeAnnotA (i, indexe, _) ->
+      let pre, post = expr_to_clang indexe program in
+      (pre, VariableA (Printf.sprintf "%s[turn^1]" i, post))
   | Ebin (op, e1, e2) ->
       let op_symbol = string_of_binop op in
       let pre1, cur1 = expr_to_clang e1 program in
@@ -261,9 +275,13 @@ let rec expr_to_clang_of_func (e : expr) (program : Module.program) : c_ast * c_
       (Empty, Variable(i))
   | EidA (i, e, d) -> (* e:添字 *)
       raise (Unreachable "In function EidA is not used")
+  | EUnsafeidA (i, e) ->
+      raise (Unreachable "In function EidA is not used")
   | EAnnot (id, annot) ->
       raise (Unreachable "In function EAnnot is not used")
   | EAnnotA (i, _, indexe, d) ->
+      raise (Unreachable "In function EAnnotA is not used")
+  | EUnsafeAnnotA _ ->
       raise (Unreachable "In function EAnnotA is not used")
   | Ebin (op, e1, e2) ->
       let op_symbol = string_of_binop op in
