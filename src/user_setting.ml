@@ -6,13 +6,17 @@ let use_pthread (thread : int) : string =
   let end_guard = "#endif" in
   let include_pthread = "#include <pthread.h>" in
   let decl_thrad = Printf.sprintf "pthread_t th[%d];" thread in
-  let fork_thread = "#define fork(i) pthread_create(th[i], NULL, loop_name(i), NULL)" in
+  let fork_thread = "#define fork(i) pthread_create(th+i, NULL, loop_name(i), NULL)" in
   let decl_barrier = "pthread_barrier_t barrier;" in
   let init_barrier = "#define init_barrier(thread) pthread_barrier_init(&barrier,NULL,(thread))" in
   let sync = "#define synchronization(tid) pthread_barrier_wait(&barrier);" in
+  let loop_returntype = "#define LOOP_RETTYPE void *" in
+  let loop_args = "#define LOOP_ARGS void *arg" in
+  let loop_returnvalue = "#define LOOP_RETVAL NULL" in
   Utils.concat_without_empty "\n" [ begin_guard; include_pthread;
                                       decl_thrad; fork_thread;
                                       decl_barrier; init_barrier; sync;
+                                      loop_returntype; loop_args; loop_returnvalue;
                                       end_guard]
 
 let user_esp32 (thread : int) : string = 
@@ -29,10 +33,14 @@ let user_esp32 (thread : int) : string =
   let decl_barrier = "EventGroupHandle_t barrier;" in
   let init_barrier = "#define init_barrier(thread) barrier = xEventGroupCreate();" in
   let sync = "#define synchronization(i) xEventGroupSync(barrier,TASK ## i ## _BIT ,ALL_TASK_BIT,portMAX_DELAY);" in
+  let loop_returntype = "#define LOOP_RETTYPE void " in
+  let loop_args = "#define LOOP_ARGS" in
+  let loop_returnvalue = "#define LOOP_RETVAL" in
   Utils.concat_without_empty "\n" [ begin_guard; include_arduino; include_m5stack;
                                       task_bits; all_task_bits;
                                       fork_thread;
                                       decl_barrier; init_barrier; sync;
+                                      loop_returntype; loop_args; loop_returnvalue;
                                       end_guard]
 
 let generate_input_function (program : Module.program) = 

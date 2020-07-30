@@ -92,8 +92,9 @@ let global_variable (ast : Syntax.ast) (prg : Module.program) (nodearrays_access
         Printf.sprintf "%s %s[2];" (Type.of_string t) i
     | Array ((i, t), n, _) ->
         let host : string = Printf.sprintf "%s %s[2][%d];" (Type.of_string t) i n in 
-        let device : string = Printf.sprintf "%s* g_%s[2];" (Type.of_string t) i in(* TODO: device is not always necessary*)
-        host ^ "\n" ^  device
+        let id = Hashtbl.find prg.id_table i in
+        let device : string = if IntSet.mem id nodearrays_accessed_from_gnode then Printf.sprintf "\n%s* g_%s[2];" (Type.of_string t) i else "" in
+        host ^ device
   in
   let input =
     List.map cpunode_to_variable ast.in_nodes |> String.concat "\n"
@@ -104,7 +105,10 @@ let global_variable (ast : Syntax.ast) (prg : Module.program) (nodearrays_access
         | Node ((i, t), _, _) ->
             Some (Printf.sprintf "%s %s[2];" (Type.of_string t) i)
         | NodeA ((i, t), n, _, _, _) ->
-            Some (Printf.sprintf "%s %s[2][%d];" (Type.of_string t) i n)
+            let host = Printf.sprintf "%s %s[2][%d];" (Type.of_string t) i n in
+            let id = Hashtbl.find prg.id_table i in
+            let device = if IntSet.mem id nodearrays_accessed_from_gnode then Printf.sprintf "\n%s* g_%s[2];" (Type.of_string t) i else "" in
+            Some (host ^ device)
         | _ ->
             None)
       ast.definitions
@@ -115,7 +119,7 @@ let global_variable (ast : Syntax.ast) (prg : Module.program) (nodearrays_access
       (function
         | Syntax.GNode ((i, t), num, _, _, _) ->
             let device = Printf.sprintf "%s* g_%s[2];" (Type.of_string t) i in
-            let host = Printf.sprintf "%s %s[2][%d];" (Type.of_string t) i num in
+            let host = Printf.sprintf "%s %s[2][%d];" (Type.of_string t) i num in (* TODO : host is not always necessary, but no information here *)
             Some (host ^ "\n" ^ device)
         | _ ->
             None)
@@ -469,14 +473,17 @@ let setup_code (ast : Syntax.ast) (prg : Module.program) (thread : int) (host_to
             let precode = code_of_c_ast preast 1 in
             let curcode = code_of_c_ast curast 1 in
             Some (Utils.concat_without_empty "\n" [precode; "\t"^i^"[1]="^curcode^";"])
-        | NodeA((i,t),num, Some(init), _, _) -> 
-            let comment = Printf.sprintf "\t/* %s */" i in
-            let pre_ast, cur_ast = expr_to_clang init prg in
-            let pre_code = code_of_c_ast pre_ast 1 in
-            let cur_code = code_of_c_ast cur_ast 1 in
-            let assign_code = Printf.sprintf "\t\t%s[1][self] = %s;" i cur_code in
-            let code = Utils.concat_without_empty "\n" [pre_code; assign_code] in
-            let for_stub = Printf.sprintf "\tfor(int self=0;self<%d;self++){\n%s\n\t}" num code in
+        | NodeA((i,t),num, init, _, _) -> 
+            let comment = Printf.sprintf "\t/* %s */" i in (* TODO : initがなくgpuから使わないnode arrayのコメントが残る *)
+            let for_stub = match init with
+              | None -> ""
+              | Some init ->
+                  let pre_ast, cur_ast = expr_to_clang init prg in
+                  let pre_code = code_of_c_ast pre_ast 1 in
+                  let cur_code = code_of_c_ast cur_ast 1 in
+                  let assign_code = Printf.sprintf "\t\t%s[1][self] = %s;" i cur_code in
+                  let code = Utils.concat_without_empty "\n" [pre_code; assign_code] in
+                  Printf.sprintf "\tfor(int self=0;self<%d;self++){\n%s\n\t}" num code in
             let gpu_memory : string = 
               let id = Hashtbl.find prg.id_table i in
               if IntSet.mem id host_to_device
@@ -604,7 +611,8 @@ let create_loop_function (ast : Syntax.ast) (program : Module.program)(*{{{*)
   for i = 0 to thread-1 do
     let head =
       let first_sync = if thread = 1 then "" else Printf.sprintf "\tsynchronization(%d);\n" i in
-      "void loop" ^ (if i=0 then "" else string_of_int i) ^ (Printf.sprintf "(){\n%s" first_sync) in
+      (* loop関数の型・返り値をマクロで制御 *)
+      (if i=0 then "void loop(){\n" else ("LOOP_RETTYPE loop" ^ string_of_int i ^ "(LOOP_ARGS){\n")) ^ first_sync in
     let body = 
       let concat_delm = if thread = 1 then "\n" else Printf.sprintf "\n\tsynchronization(%d);\n" i in
       List.init (max_fsd+1) (fun i -> max_fsd - i) |> 
@@ -612,8 +620,9 @@ let create_loop_function (ast : Syntax.ast) (program : Module.program)(*{{{*)
       String.concat concat_delm
     in
     let tail = 
-      if thread = 1 then "\n}" 
-                    else Printf.sprintf "\n\tsynchronization(%d);\n}" i
+      let tail_sync = if thread = 1 then "" else Printf.sprintf "\n\tsynchronization(%d);" i in
+      let tail_ret  = if i = 0 then "" else "\n\treturn LOOP_RETVAL;" in
+      tail_sync ^ tail_ret ^ "\n}" 
     in
     loop_functions.(i) <- head ^ body ^ tail
   done;
