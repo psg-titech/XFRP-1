@@ -75,7 +75,7 @@ let construct_graph (ast : Syntax.ast) (program : Module.program) : (int,IntSet.
       | Node ((node, t), _, e) ->
           let id = Hashtbl.find program.id_table node in
           Hashtbl.add ptbl id (collect_nodeid e)
-      | NodeA ((node, t), _, _, e, _) ->
+      | NodeA ((node, t), _, _, _, e) ->
           let id = Hashtbl.find program.id_table node in
           Hashtbl.add ptbl id (collect_nodeid e)
       | GNode ((nodename,t), _, _, _, e) -> 

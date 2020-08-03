@@ -75,10 +75,11 @@ let rec string_of_c_ast (ast : c_ast) : string =(*{{{*)
       List.map string_of_c_ast codes |> String.concat " :: "(*}}}*)
 
 (* Header周り *)
-let header_list = ["stdio.h"; "stdlib.h"; "cuda_runtime.h" ; "helper_functions.h"; "helper_cuda.h"](*{{{*)
+let header_list = ["stdio.h"; "stdlib.h"](*{{{*)
+let header_list_gpu = header_list @ ["cuda_runtime.h" ; "helper_functions.h"; "helper_cuda.h"]
 let header_list2 = ["setting.h"]
-let header_code () =
-  List.map (fun s -> "#include<" ^ s ^ ">") header_list |> String.concat "\n"
+let header_code use_gpu =
+  List.map (fun s -> "#include<" ^ s ^ ">") (if use_gpu then header_list_gpu else header_list) |> String.concat "\n"
 let header_code2 () =
   List.map (fun s -> Printf.sprintf "#include \"%s\"" s) header_list2 |> Utils.concat_without_empty "\n"
 let macros = ["#define bool int"; "#define true 1"; "#define false 0"]
@@ -685,8 +686,8 @@ let generate_input_support (program : Module.program) (host_to_device : IntSet.t
 
 (* 全体のC言語のコードを文字列として出力する *)
 (* 外部からはこの関数を呼べばいい *)
-let code_of_ast (ast:Syntax.ast) (prg:Module.program) (thread:int) : string =(*{{{*)
-  let header = header_code () in
+let code_of_ast (ast:Syntax.ast) (prg:Module.program) (thread:int) (use_gpu:bool) : string =(*{{{*)
+  let header = header_code use_gpu in
   let header2 = header_code2 () in
   let macros = macro_code () in
   let require_host_to_device_node =  (* The set of node array accessed from gpu node *)
@@ -737,7 +738,7 @@ let code_of_ast (ast:Syntax.ast) (prg:Module.program) (thread:int) : string =(*{
       | _ -> IntSet.empty
     in
     List.filter_map (function | Node (_, _, e) -> Some(traverse_expr e)
-                              | NodeA (_,_,_,e,_) -> Some(traverse_expr e)
+                              | NodeA (_,_,_,_, e) -> Some(traverse_expr e)
                               | _ -> None)
                     ast.definitions
     |> List.fold_left (fun set acc -> IntSet.union set acc) IntSet.empty(*}}}*)
@@ -762,7 +763,7 @@ let code_of_ast (ast:Syntax.ast) (prg:Module.program) (thread:int) : string =(*{
   let node_array_update : string = (* Internal/Output配列ノードの更新関数を定義 *)
     List.filter_map
       (function
-        | NodeA ((i, t), _, _, e, _) -> Some (generate_nodearray_update i e prg require_host_to_device_node)
+        | NodeA ((i, t), _, _, _, e) -> Some (generate_nodearray_update i e prg require_host_to_device_node)
         | _ -> None)
       ast.definitions
     |> Utils.concat_without_empty "\n\n"

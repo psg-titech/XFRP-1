@@ -132,7 +132,7 @@ let rec string_of_expr = function
 
 type definition =
   | Node of id_and_type * expr option (* init *) * expr
-  | NodeA of id_and_type * int * expr option * expr * const
+  | NodeA of id_and_type * int * expr option * const * expr
   | GNode of  id_and_type *
               int (* array size *) *
               expr option (* init *) *
@@ -156,8 +156,12 @@ let string_of_definition = function
   | GNode (it, n, None, def, e) ->
       "GNode {\n\t" ^ string_of_id_and_type it ^ " ,\n\tinit = " ^ "NONE"
       ^ "\n\texpr = " ^ string_of_expr e ^ "\n}"
-  | NodeA _ ->
-      "NodeA is notimplmented"
+  | NodeA (it, n, Some ie, def, e) ->
+      "GNode {\n\t" ^ string_of_id_and_type it ^ " ,\n\tinit = "
+      ^ string_of_expr ie ^ "\n\texpr = " ^ string_of_expr e ^ "\n}"
+  | NodeA (it, n, None, def, e) ->
+      "GNode {\n\t" ^ string_of_id_and_type it ^ " ,\n\tinit = " ^ "NONE"
+      ^ "\n\texpr = " ^ string_of_expr e ^ "\n}"
   | Func _ -> 
       "Func is not implemented"
 

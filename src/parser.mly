@@ -63,7 +63,7 @@ definition :
       {
         match n with
         | None -> Node((i,t),init,e)
-        | Some(n,c) -> NodeA((i,t),n,init,e,c)
+        | Some(n,c) -> NodeA((i,t),n,init,c,e)
       }
   | GNODE (* gnode init[0] x@1024 : Int = ... *)
       init = option(INIT LBRACKET ie = init_expr RBRACKET {ie})
