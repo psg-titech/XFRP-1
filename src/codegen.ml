@@ -199,7 +199,7 @@ let rec expr_to_clang (e : expr) (program : Module.program) : c_ast * c_ast =(*{
       let node = Hashtbl.find program.info_table node_id in
       let result_variable = get_unique_name () in
       (*
-       * int index_post = ...
+       * int index_post = ... (* TODO : index_postは普通に毎回計算されている *)
        * <Type.t> tmp;
        * if(index_post < size){
        *    tmp = i[turn][index_post];
@@ -214,7 +214,9 @@ let rec expr_to_clang (e : expr) (program : Module.program) : c_ast * c_ast =(*{
         | None -> Const(Syntax.string_of_const default_code)
         | Some d -> snd (expr_to_clang d program) in (* TODO : fstは空のはず *)
       let check_index_code = If((node.t,result_variable),
-                                (Empty, Binop("<",index_post, Variable(string_of_int node.number))), (* TODO : 0以上のチェック不足 *)
+                                (Empty, Binop("&&",
+                                          Binop("<=", Const "0", index_post),
+                                          Binop("<",index_post, Const (string_of_int node.number)))),
                                 (Empty, VariableA(Printf.sprintf "%s[turn]" i, index_post)),
                                 (Empty, default_value)) in
       (CodeList [index_pre; check_index_code], Variable(result_variable))
@@ -223,11 +225,36 @@ let rec expr_to_clang (e : expr) (program : Module.program) : c_ast * c_ast =(*{
       (index_pre, VariableA(Printf.sprintf "%s[turn]" i, index_post))
   | EAnnot (id, annot) ->
       (Empty, Variable (id ^ "[turn^1]"))
-  | EAnnotA (i, indexe, _, d) ->
-      let pre, post = expr_to_clang indexe program in
-      (pre, VariableA (Printf.sprintf "%s[turn^1]" i, post)) (* TODO : default valueの処理がない *)
-  | EUnsafeAnnotA (i, indexe, _) ->
-      let pre, post = expr_to_clang indexe program in
+  | EAnnotA (i, e, _, d) ->
+      let index_pre, index_post = expr_to_clang e program in
+      let node_id = Hashtbl.find program.id_table i in
+      let node = Hashtbl.find program.info_table node_id in
+      let result_variable = get_unique_name () in
+      (*
+       * int index_post = ... (* TODO : index_postは普通に毎回計算されている *)
+       * <Type.t> tmp;
+       * if(index_post < size){
+       *    tmp = i[turn^i][index_post];
+       * }else{
+       *    tmp = iの定数;
+       * }
+       * <post> := tmp
+       *)
+      let default_code = Option.get node.default in
+      let default_value =
+        match d with
+        | None -> Const(Syntax.string_of_const default_code)
+        | Some d -> snd (expr_to_clang d program) in (* TODO : fstは空のはず *)
+      let check_index_code = If((node.t,result_variable),
+                                (Empty, Binop("&&",
+                                          Binop("<=", Const "0", index_post),
+                                          Binop("<",index_post, Const (string_of_int node.number)))),
+                                (Empty, VariableA(Printf.sprintf "%s[turn^1]" i, index_post)),
+                                (Empty, default_value)) in
+      (CodeList [index_pre; check_index_code], Variable(result_variable))
+
+  | EUnsafeAnnotA (i, e, _) ->
+      let pre, post = expr_to_clang e program in
       (pre, VariableA (Printf.sprintf "%s[turn^1]" i, post))
   | Ebin (op, e1, e2) ->
       let op_symbol = string_of_binop op in
