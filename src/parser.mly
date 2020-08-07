@@ -6,7 +6,7 @@
 %}
 
 (* 予約後 *)
-%token MODULE IN OUT USE INIT NODE GNODE TRUE FALSE IF THEN ELSE AT LAST SELF FUNC WITH DEFAULT QUESTION
+%token MODULE IN OUT USE INIT NODE GNODE TRUE FALSE IF THEN ELSE AT LAST SELF FUNC WITH DEFAULT
 (* 括弧 *)
 %token LBRACKET RBRACKET LPAREN RPAREN
 (* 記号 *)
@@ -93,7 +93,7 @@ expr :
     | None -> Eid(id)
     | Some a -> EAnnot(id, a)
   }
-  | id = ID LBRACKET e = expr RBRACKET annot = option(AT a = annotation {a}) d = option(QUESTION d = dexpr {d})
+  | id = ID LBRACKET e = expr RBRACKET annot = option(AT a = annotation {a}) d = option(LPAREN d = dexpr RPAREN {d})
   { match annot with
     | None -> EidA(id,e,d)
     | Some a -> EAnnotA(id,e,a,d)
