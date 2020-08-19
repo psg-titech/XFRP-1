@@ -63,7 +63,7 @@ definition :
       {
         match n with
         | None -> Node((i,t),init,e)
-        | Some(n,c) -> NodeA((i,t),n,init,e,c)
+        | Some(n,c) -> NodeA((i,t),n,init,c,e)
       }
   | GNODE (* gnode init[0] x@1024 : Int = ... *)
       init = option(INIT LBRACKET ie = init_expr RBRACKET {ie})
@@ -93,10 +93,10 @@ expr :
     | None -> Eid(id)
     | Some a -> EAnnot(id, a)
   }
-  | id = ID LBRACKET e = expr RBRACKET annot = option(AT a = annotation {a})
+  | id = ID LBRACKET e = expr RBRACKET annot = option(AT a = annotation {a}) d = option(LPAREN d = dexpr RPAREN {d})
   { match annot with
-    | None -> EidA(id,e)
-    | Some a -> EAnnotA(id,e,a)
+    | None -> EidA(id,e,d)
+    | Some a -> EAnnotA(id,e,a,d)
   }
 (*  | id = ID AT a = annotation { EAnnot(id,a) } *)
 (*)  | id = ID AT a = annotation LBRACKET e = expr RBRACKET { EAnnotA(id,a,e) } *)
@@ -105,20 +105,19 @@ expr :
   | LPAREN expr RPAREN { $2 }
   | IF cond = expr THEN e1 = expr ELSE e2 = expr %prec prec_if { Eif(cond,e1,e2) } (* %prec prec_if down the priority of if statement *)
 
-gexpr : 
-  | SELF            { GSelf }
-  | constant        { GConst($1) }
-  (* ここらへんのパースはもう少し上手くやれそうな気がする *)
-  | id = ID         { Gid(id) }
-  | id = ID AT a = annotation { GAnnot(id,a) }
-  | id = ID LBRACKET index = gexpr RBRACKET { GIdAt(id,index) }
-  | id = ID LBRACKET index = gexpr RBRACKET AT a = annotation { GIdAtAnnot(id,index,a) }
-  (* Function Call *)
-  | id = ID LPAREN args = separated_list(COMMA,gexpr) RPAREN { GApp(id,args) }
-  | gexpr binop gexpr   { Gbin($2,$1,$3) }
-  | LPAREN gexpr RPAREN  { $2 }
-  | IF cond = gexpr THEN e1 = gexpr ELSE e2 = gexpr %prec prec_if { Gif(cond,e1,e2) }
-
+(* expression allowed in default access value *)
+dexpr :
+  | constant       { EConst($1) }
+  | id = ID annot = option(AT a = annotation {a})
+  { match annot with
+    | None -> Eid(id)
+    | Some a -> EAnnot(id, a)
+  }
+  | id = ID LBRACKET c = node_number RBRACKET annot = option(AT a = annotation {a})
+  { match annot with
+    | None -> EUnsafeidA(id,EConst(CInt(c)))
+    | Some a -> EUnsafeAnnotA(id,EConst(CInt(c)),a)
+  }
 
 (* ---------- Initialize Node value -------------------- *)
 (* restricted expression for initialize the node value *)

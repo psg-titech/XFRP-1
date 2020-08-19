@@ -34,8 +34,20 @@ let collect_argument (gexpr : Syntax.expr) (program : Module.program) =
         let nodeid = Hashtbl.find program.id_table symbol in
         let second = if IntSet.mem nodeid program.single_nodes then IntSet.singleton nodeid else IntSet.empty in
         (IntSet.empty, second)
-    | EidA (_ , ge) -> collect_single_node ge
-    | EAnnotA (_, ge, _) -> collect_single_node ge
+    | EidA (_ , ge, d) -> 
+        let f1, s1 = collect_single_node ge in
+        let f2, s2 = match d with
+                     | None -> (IntSet.empty, IntSet.empty)
+                     | Some d -> collect_single_node d in
+        (IntSet.union f1 f2, IntSet.union s1 s2)
+    | EAnnotA (_, ge, _, d) ->
+        let f1, s1 = collect_single_node ge in
+        let f2, s2 = match d with
+                   | None -> (IntSet.empty, IntSet.empty)
+                   | Some d -> collect_single_node d in
+        (IntSet.union f1 f2, IntSet.union s1 s2)
+    | EUnsafeidA (_, ge) -> collect_single_node ge
+    | EUnsafeAnnotA (_, ge, _) -> collect_single_node ge
     | Ebin (_, ge1, ge2) ->
         let f1, s1 = collect_single_node ge1 in
         let f2, s2 = collect_single_node ge2 in
@@ -61,20 +73,40 @@ let collect_argument (gexpr : Syntax.expr) (program : Module.program) =
   | EConst _ -> (IntSet.empty, IntSet.empty)
   | Eid _ -> (IntSet.empty, IntSet.empty)
   | EAnnot _ ->  (IntSet.empty, IntSet.empty)
-  | EidA (symbol, ge) -> 
+  | EidA (symbol, ge, d) -> 
+      let set = if (List.mem symbol program.gnode)
+                  then IntSet.empty
+                  else IntSet.singleton (Hashtbl.find program.id_table symbol)
+      in
+      let f1,s1 = collect_node_array ge in
+      let f2,s2 = match d with
+                  | None -> (IntSet.empty, IntSet.empty)
+                  | Some d -> collect_node_array d in
+      (IntSet.union f1 (IntSet.union f2 set), IntSet.union s1 s2)
+  | EAnnotA (symbol, ge, _, d) ->
+      let set = if (List.mem symbol program.gnode)
+                  then IntSet.empty
+                  else IntSet.singleton (Hashtbl.find program.id_table symbol)
+      in
+      let f1,s1 = collect_node_array ge in
+      let f2,s2 = match d with
+                | None -> (IntSet.empty, IntSet.empty)
+                | Some d -> collect_node_array d in
+    (IntSet.union f1 f2, IntSet.union s1 (IntSet.union s2 set))
+  | EUnsafeidA (symbol, ge) -> 
       let set = if (List.mem symbol program.gnode)
                   then IntSet.empty
                   else IntSet.singleton (Hashtbl.find program.id_table symbol)
       in
       let f,s = collect_node_array ge in
       (IntSet.union f set, s)
-  | EAnnotA (symbol, ge, _) ->
+  | EUnsafeAnnotA (symbol, ge, _) ->
       let set = if (List.mem symbol program.gnode)
                   then IntSet.empty
                   else IntSet.singleton (Hashtbl.find program.id_table symbol)
       in
       let f,s = collect_node_array ge in
-      (IntSet.union f set, s)
+      (f, IntSet.union s set)
   | Ebin (_, ge1, ge2) -> 
       let f1, s1 = collect_node_array ge1 in
       let f2, s2 = collect_node_array ge2 in
@@ -100,20 +132,40 @@ let collect_argument (gexpr : Syntax.expr) (program : Module.program) =
   | EConst _ -> (IntSet.empty, IntSet.empty)
   | Eid _ -> (IntSet.empty, IntSet.empty)
   | EAnnot _ -> (IntSet.empty, IntSet.empty)
-  | EidA (symbol, ge) -> 
+  | EidA (symbol, ge, d) -> 
       let set = if (List.mem symbol program.gnode)
                   then IntSet.singleton (Hashtbl.find program.id_table symbol)
                   else IntSet.empty
       in
-      let f,s = collect_node_array ge in
-      (IntSet.union f set, s)
-  | EAnnotA (symbol, ge, _) ->
+      let f1,s1 = collect_gnode ge in
+      let f2,s2 = match d with
+                  | None -> (IntSet.empty, IntSet.empty)
+                  | Some d -> collect_gnode d in
+      (IntSet.union f1 (IntSet.union f2 set), IntSet.union s1 s2)
+  | EAnnotA (symbol, ge, _, d) ->
       let set = if (List.mem symbol program.gnode)
                   then  IntSet.singleton (Hashtbl.find program.id_table symbol)
                   else IntSet.empty
       in
-      let f,s = collect_node_array ge in
+      let f1,s1 = collect_gnode ge in
+      let f2,s2 = match d with
+                  | None -> (IntSet.empty, IntSet.empty)
+                  | Some d -> collect_gnode d in
+      (IntSet.union f1 f2, IntSet.union s1 (IntSet.union s2 set))
+  | EUnsafeidA (symbol, ge) -> 
+      let set = if (List.mem symbol program.gnode)
+                  then IntSet.singleton (Hashtbl.find program.id_table symbol)
+                  else IntSet.empty
+      in
+      let f,s = collect_gnode ge in
       (IntSet.union f set, s)
+  | EUnsafeAnnotA (symbol, ge, _) ->
+      let set = if (List.mem symbol program.gnode)
+                  then  IntSet.singleton (Hashtbl.find program.id_table symbol)
+                  else IntSet.empty
+      in
+      let f,s = collect_gnode ge in
+      (f, IntSet.union s set)
   | Ebin (_, ge1, ge2) -> 
       let f1, s1 = collect_gnode ge1 in
       let f2, s2 = collect_gnode ge2 in

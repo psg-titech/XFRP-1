@@ -6,13 +6,17 @@ let use_pthread (thread : int) : string =
   let end_guard = "#endif" in
   let include_pthread = "#include <pthread.h>" in
   let decl_thrad = Printf.sprintf "pthread_t th[%d];" thread in
-  let fork_thread = "#define fork(i) pthread_create(th[i], NULL, loop_name(i), NULL)" in
+  let fork_thread = "#define fork(i) pthread_create(th+i, NULL, loop_name(i), NULL)" in
   let decl_barrier = "pthread_barrier_t barrier;" in
   let init_barrier = "#define init_barrier(thread) pthread_barrier_init(&barrier,NULL,(thread))" in
   let sync = "#define synchronization(tid) pthread_barrier_wait(&barrier);" in
+  let loop_returntype = "#define LOOP_RETTYPE void *" in
+  let loop_args = "#define LOOP_ARGS void *arg" in
+  let loop_returnvalue = "#define LOOP_RETVAL NULL" in
   Utils.concat_without_empty "\n" [ begin_guard; include_pthread;
                                       decl_thrad; fork_thread;
                                       decl_barrier; init_barrier; sync;
+                                      loop_returntype; loop_args; loop_returnvalue;
                                       end_guard]
 
 let user_esp32 (thread : int) : string = 
@@ -29,10 +33,14 @@ let user_esp32 (thread : int) : string =
   let decl_barrier = "EventGroupHandle_t barrier;" in
   let init_barrier = "#define init_barrier(thread) barrier = xEventGroupCreate();" in
   let sync = "#define synchronization(i) xEventGroupSync(barrier,TASK ## i ## _BIT ,ALL_TASK_BIT,portMAX_DELAY);" in
+  let loop_returntype = "#define LOOP_RETTYPE void " in
+  let loop_args = "#define LOOP_ARGS" in
+  let loop_returnvalue = "#define LOOP_RETVAL" in
   Utils.concat_without_empty "\n" [ begin_guard; include_arduino; include_m5stack;
                                       task_bits; all_task_bits;
                                       fork_thread;
                                       decl_barrier; init_barrier; sync;
+                                      loop_returntype; loop_args; loop_returnvalue;
                                       end_guard]
 
 let generate_input_function (program : Module.program) = 
@@ -46,8 +54,7 @@ let generate_input_function (program : Module.program) =
     program.input
     |> Utils.concat_without_empty ","
   in
-  let head = Printf.sprintf "void input(%s){"  args in
-  head ^ "\n" ^ "}"
+  Printf.sprintf "void input(%s){\n\t// process input nodes here\n}"  args
 
 let generate_output_function (program : Module.program) = 
   let args = 
@@ -60,14 +67,17 @@ let generate_output_function (program : Module.program) =
     program.output
     |> Utils.concat_without_empty ","
   in
-  (Printf.sprintf "void output(%s){" args) ^ "\n" ^ "}"
+  Printf.sprintf "void output(%s){\n\t// process output nodes here\n}" args
 
+let generate_setup_function () =
+  "void user_setup() {\n\t// initial settings here\n}"
 
 let generate_user_setting_file (thread : int) (ast : Syntax.ast) (program : Module.program) =
   let filename = "setting.h" in
   let out_c = open_out filename in
   let input = generate_input_function program in
   let output = generate_output_function program in
-  let s = Utils.concat_without_empty "\n\n" [loop_name_generator ; use_pthread thread; user_esp32 thread; input; output;] in
+  let setup = generate_setup_function () in
+  let s = Utils.concat_without_empty "\n\n" [loop_name_generator ; use_pthread thread; user_esp32 thread; input; output; setup;] in
   Printf.fprintf out_c "%s" s;
   close_out out_c

@@ -75,10 +75,11 @@ let rec string_of_c_ast (ast : c_ast) : string =(*{{{*)
       List.map string_of_c_ast codes |> String.concat " :: "(*}}}*)
 
 (* Header周り *)
-let header_list = ["stdio.h"; "stdlib.h"; "cuda_runtime.h" ; "helper_functions.h"; "helper_cuda.h"](*{{{*)
+let header_list = ["stdio.h"; "stdlib.h"](*{{{*)
+let header_list_gpu = header_list @ ["cuda_runtime.h" ; "helper_functions.h"; "helper_cuda.h"]
 let header_list2 = ["setting.h"]
-let header_code () =
-  List.map (fun s -> "#include<" ^ s ^ ">") header_list |> String.concat "\n"
+let header_code use_gpu =
+  List.map (fun s -> "#include<" ^ s ^ ">") (if use_gpu then header_list_gpu else header_list) |> String.concat "\n"
 let header_code2 () =
   List.map (fun s -> Printf.sprintf "#include \"%s\"" s) header_list2 |> Utils.concat_without_empty "\n"
 let macros = ["#define bool int"; "#define true 1"; "#define false 0"]
@@ -92,8 +93,9 @@ let global_variable (ast : Syntax.ast) (prg : Module.program) (nodearrays_access
         Printf.sprintf "%s %s[2];" (Type.of_string t) i
     | Array ((i, t), n, _) ->
         let host : string = Printf.sprintf "%s %s[2][%d];" (Type.of_string t) i n in 
-        let device : string = Printf.sprintf "%s* g_%s[2];" (Type.of_string t) i in(* TODO: device is not always necessary*)
-        host ^ "\n" ^  device
+        let id = Hashtbl.find prg.id_table i in
+        let device : string = if IntSet.mem id nodearrays_accessed_from_gnode then Printf.sprintf "\n%s* g_%s[2];" (Type.of_string t) i else "" in
+        host ^ device
   in
   let input =
     List.map cpunode_to_variable ast.in_nodes |> String.concat "\n"
@@ -104,7 +106,10 @@ let global_variable (ast : Syntax.ast) (prg : Module.program) (nodearrays_access
         | Node ((i, t), _, _) ->
             Some (Printf.sprintf "%s %s[2];" (Type.of_string t) i)
         | NodeA ((i, t), n, _, _, _) ->
-            Some (Printf.sprintf "%s %s[2][%d];" (Type.of_string t) i n)
+            let host = Printf.sprintf "%s %s[2][%d];" (Type.of_string t) i n in
+            let id = Hashtbl.find prg.id_table i in
+            let device = if IntSet.mem id nodearrays_accessed_from_gnode then Printf.sprintf "\n%s* g_%s[2];" (Type.of_string t) i else "" in
+            Some (host ^ device)
         | _ ->
             None)
       ast.definitions
@@ -115,7 +120,7 @@ let global_variable (ast : Syntax.ast) (prg : Module.program) (nodearrays_access
       (function
         | Syntax.GNode ((i, t), num, _, _, _) ->
             let device = Printf.sprintf "%s* g_%s[2];" (Type.of_string t) i in
-            let host = Printf.sprintf "%s %s[2][%d];" (Type.of_string t) i num in
+            let host = Printf.sprintf "%s %s[2][%d];" (Type.of_string t) i num in (* TODO : host is not always necessary, but no information here *)
             Some (host ^ "\n" ^ device)
         | _ ->
             None)
@@ -134,7 +139,11 @@ let rec get_xfrp_expr_type (e : expr) (program : Module.program) : Type.t = (*{{
         let id = Hashtbl.find program.id_table name in
         let node = Hashtbl.find program.info_table id in
         node.t
-    | EidA (name,_) -> 
+    | EidA (name,_,d) -> 
+        let id = Hashtbl.find program.id_table name in
+        let node = Hashtbl.find program.info_table id in (* TODO : dの型との対応確認 *)
+        node.t
+    | EUnsafeidA (name,_) -> 
         let id = Hashtbl.find program.id_table name in
         let node = Hashtbl.find program.info_table id in
         node.t
@@ -142,7 +151,11 @@ let rec get_xfrp_expr_type (e : expr) (program : Module.program) : Type.t = (*{{
         let id = Hashtbl.find program.id_table name in
         let node = Hashtbl.find program.info_table id in
         node.t
-    | EAnnotA (name,_,_) -> 
+    | EAnnotA (name,_,_,d) -> 
+        let id = Hashtbl.find program.id_table name in
+        let node = Hashtbl.find program.info_table id in (* TODO : dの型との対応確認 *)
+        node.t
+    | EUnsafeAnnotA (name,_,_) -> 
         let id = Hashtbl.find program.id_table name in
         let node = Hashtbl.find program.info_table id in
         node.t
@@ -180,13 +193,13 @@ let rec expr_to_clang (e : expr) (program : Module.program) : c_ast * c_ast =(*{
       (Empty, Const (Syntax.string_of_const e))
   | Eid i ->
       (Empty, Variable (i ^ "[turn]"))
-  | EidA (i, e) -> (* e:添字 *)
+  | EidA (i, e, d) -> (* e:添字 *)
       let index_pre, index_post = expr_to_clang e program in
       let node_id = Hashtbl.find program.id_table i in
       let node = Hashtbl.find program.info_table node_id in
       let result_variable = get_unique_name () in
       (*
-       * int index_post = ...
+       * int index_post = ... (* TODO : index_postは普通に毎回計算されている *)
        * <Type.t> tmp;
        * if(index_post < size){
        *    tmp = i[turn][index_post];
@@ -195,16 +208,53 @@ let rec expr_to_clang (e : expr) (program : Module.program) : c_ast * c_ast =(*{
        * }
        * <post> := tmp
        *)
-      let default_value = Option.get node.default in
+      let default_code = Option.get node.default in
+      let default_value =
+        match d with
+        | None -> Const(Syntax.string_of_const default_code)
+        | Some d -> snd (expr_to_clang d program) in (* TODO : fstは空のはず *)
       let check_index_code = If((node.t,result_variable),
-                                (Empty, Binop("<",index_post, Variable(string_of_int node.number))),
+                                (Empty, Binop("&&",
+                                          Binop("<=", Const "0", index_post),
+                                          Binop("<",index_post, Const (string_of_int node.number)))),
                                 (Empty, VariableA(Printf.sprintf "%s[turn]" i, index_post)),
-                                (Empty,Const(Syntax.string_of_const default_value))) in
+                                (Empty, default_value)) in
       (CodeList [index_pre; check_index_code], Variable(result_variable))
+  | EUnsafeidA (i, e) -> (* e:添字 *)
+      let index_pre, index_post = expr_to_clang e program in
+      (index_pre, VariableA(Printf.sprintf "%s[turn]" i, index_post))
   | EAnnot (id, annot) ->
       (Empty, Variable (id ^ "[turn^1]"))
-  | EAnnotA (i, indexe, _) ->
-      let pre, post = expr_to_clang indexe program in
+  | EAnnotA (i, e, _, d) ->
+      let index_pre, index_post = expr_to_clang e program in
+      let node_id = Hashtbl.find program.id_table i in
+      let node = Hashtbl.find program.info_table node_id in
+      let result_variable = get_unique_name () in
+      (*
+       * int index_post = ... (* TODO : index_postは普通に毎回計算されている *)
+       * <Type.t> tmp;
+       * if(index_post < size){
+       *    tmp = i[turn^i][index_post];
+       * }else{
+       *    tmp = iの定数;
+       * }
+       * <post> := tmp
+       *)
+      let default_code = Option.get node.default in
+      let default_value =
+        match d with
+        | None -> Const(Syntax.string_of_const default_code)
+        | Some d -> snd (expr_to_clang d program) in (* TODO : fstは空のはず *)
+      let check_index_code = If((node.t,result_variable),
+                                (Empty, Binop("&&",
+                                          Binop("<=", Const "0", index_post),
+                                          Binop("<",index_post, Const (string_of_int node.number)))),
+                                (Empty, VariableA(Printf.sprintf "%s[turn^1]" i, index_post)),
+                                (Empty, default_value)) in
+      (CodeList [index_pre; check_index_code], Variable(result_variable))
+
+  | EUnsafeAnnotA (i, e, _) ->
+      let pre, post = expr_to_clang e program in
       (pre, VariableA (Printf.sprintf "%s[turn^1]" i, post))
   | Ebin (op, e1, e2) ->
       let op_symbol = string_of_binop op in
@@ -255,11 +305,15 @@ let rec expr_to_clang_of_func (e : expr) (program : Module.program) : c_ast * c_
       (Empty, Const (Syntax.string_of_const e))
   | Eid i ->
       (Empty, Variable(i))
-  | EidA (i, e) -> (* e:添字 *)
+  | EidA (i, e, d) -> (* e:添字 *)
+      raise (Unreachable "In function EidA is not used")
+  | EUnsafeidA (i, e) ->
       raise (Unreachable "In function EidA is not used")
   | EAnnot (id, annot) ->
       raise (Unreachable "In function EAnnot is not used")
-  | EAnnotA (i, _, indexe) ->
+  | EAnnotA (i, _, indexe, d) ->
+      raise (Unreachable "In function EAnnotA is not used")
+  | EUnsafeAnnotA _ ->
       raise (Unreachable "In function EAnnotA is not used")
   | Ebin (op, e1, e2) ->
       let op_symbol = string_of_binop op in
@@ -447,14 +501,17 @@ let setup_code (ast : Syntax.ast) (prg : Module.program) (thread : int) (host_to
             let precode = code_of_c_ast preast 1 in
             let curcode = code_of_c_ast curast 1 in
             Some (Utils.concat_without_empty "\n" [precode; "\t"^i^"[1]="^curcode^";"])
-        | NodeA((i,t),num, Some(init), _, _) -> 
-            let comment = Printf.sprintf "\t/* %s */" i in
-            let pre_ast, cur_ast = expr_to_clang init prg in
-            let pre_code = code_of_c_ast pre_ast 1 in
-            let cur_code = code_of_c_ast cur_ast 1 in
-            let assign_code = Printf.sprintf "\t\t%s[1][self] = %s;" i cur_code in
-            let code = Utils.concat_without_empty "\n" [pre_code; assign_code] in
-            let for_stub = Printf.sprintf "\tfor(int self=0;self<%d;self++){\n%s\n\t}" num code in
+        | NodeA((i,t),num, init, _, _) -> 
+            let comment = Printf.sprintf "\t/* %s */" i in (* TODO : initがなくgpuから使わないnode arrayのコメントが残る *)
+            let for_stub = match init with
+              | None -> ""
+              | Some init ->
+                  let pre_ast, cur_ast = expr_to_clang init prg in
+                  let pre_code = code_of_c_ast pre_ast 1 in
+                  let cur_code = code_of_c_ast cur_ast 1 in
+                  let assign_code = Printf.sprintf "\t\t%s[1][self] = %s;" i cur_code in
+                  let code = Utils.concat_without_empty "\n" [pre_code; assign_code] in
+                  Printf.sprintf "\tfor(int self=0;self<%d;self++){\n%s\n\t}" num code in
             let gpu_memory : string = 
               let id = Hashtbl.find prg.id_table i in
               if IntSet.mem id host_to_device
@@ -582,7 +639,8 @@ let create_loop_function (ast : Syntax.ast) (program : Module.program)(*{{{*)
   for i = 0 to thread-1 do
     let head =
       let first_sync = if thread = 1 then "" else Printf.sprintf "\tsynchronization(%d);\n" i in
-      "void loop" ^ (if i=0 then "" else string_of_int i) ^ (Printf.sprintf "(){\n%s" first_sync) in
+      (* loop関数の型・返り値をマクロで制御 *)
+      (if i=0 then "void loop(){\n" else ("LOOP_RETTYPE loop" ^ string_of_int i ^ "(LOOP_ARGS){\n")) ^ first_sync in
     let body = 
       let concat_delm = if thread = 1 then "\n" else Printf.sprintf "\n\tsynchronization(%d);\n" i in
       List.init (max_fsd+1) (fun i -> max_fsd - i) |> 
@@ -590,8 +648,9 @@ let create_loop_function (ast : Syntax.ast) (program : Module.program)(*{{{*)
       String.concat concat_delm
     in
     let tail = 
-      if thread = 1 then "\n}" 
-                    else Printf.sprintf "\n\tsynchronization(%d);\n}" i
+      let tail_sync = if thread = 1 then "" else Printf.sprintf "\n\tsynchronization(%d);" i in
+      let tail_ret  = if i = 0 then "" else "\n\treturn LOOP_RETVAL;" in
+      tail_sync ^ tail_ret ^ "\n}" 
     in
     loop_functions.(i) <- head ^ body ^ tail
   done;
@@ -654,16 +713,20 @@ let generate_input_support (program : Module.program) (host_to_device : IntSet.t
 
 (* 全体のC言語のコードを文字列として出力する *)
 (* 外部からはこの関数を呼べばいい *)
-let code_of_ast (ast:Syntax.ast) (prg:Module.program) (thread:int) : string =(*{{{*)
-  let header = header_code () in
+let code_of_ast (ast:Syntax.ast) (prg:Module.program) (thread:int) (use_gpu:bool) : string =(*{{{*)
+  let header = header_code use_gpu in
   let header2 = header_code2 () in
   let macros = macro_code () in
   let require_host_to_device_node =  (* The set of node array accessed from gpu node *)
     let rec traverse_gexpr gexpr = (*{{{*)
       match gexpr with
-      | EidA (sym, g) | EAnnotA(sym,g,_) ->
+      | EidA (sym, g, d) | EAnnotA(sym, g, _, d) ->
           let id = Hashtbl.find prg.id_table sym in
           let set = if IntSet.mem id prg.node_arrays then IntSet.singleton id else IntSet.empty in
+          let set =
+            match d with
+            | None -> set
+            | Some d -> IntSet.union set (traverse_gexpr d) in
           IntSet.union set (traverse_gexpr g)
       | Ebin (_, g1,g2) -> 
           IntSet.union (traverse_gexpr g1) (traverse_gexpr g2)
@@ -685,9 +748,13 @@ let code_of_ast (ast:Syntax.ast) (prg:Module.program) (thread:int) : string =(*{
   let gpunodes_accessed_by_cpunode : IntSet.t =
     let rec traverse_expr expr : IntSet.t = (*{{{*)
       match expr with
-      | EidA (sym, index_e) | EAnnotA (sym, index_e, _) -> 
+      | EidA (sym, index_e, d) | EAnnotA (sym, index_e, _, d) -> 
           let id = Hashtbl.find prg.id_table sym in
           let set1 = if List.mem sym prg.gnode then IntSet.singleton id else IntSet.empty in
+          let set1 =
+            match d with
+            | None -> set1
+            | Some d -> IntSet.union set1 (traverse_expr d) in
           IntSet.union set1 (traverse_expr index_e)
       | Ebin(_, e1, e2) ->
           IntSet.union (traverse_expr e1) (traverse_expr e2)
@@ -698,7 +765,7 @@ let code_of_ast (ast:Syntax.ast) (prg:Module.program) (thread:int) : string =(*{
       | _ -> IntSet.empty
     in
     List.filter_map (function | Node (_, _, e) -> Some(traverse_expr e)
-                              | NodeA (_,_,_,e,_) -> Some(traverse_expr e)
+                              | NodeA (_,_,_,_, e) -> Some(traverse_expr e)
                               | _ -> None)
                     ast.definitions
     |> List.fold_left (fun set acc -> IntSet.union set acc) IntSet.empty(*}}}*)
@@ -723,7 +790,7 @@ let code_of_ast (ast:Syntax.ast) (prg:Module.program) (thread:int) : string =(*{
   let node_array_update : string = (* Internal/Output配列ノードの更新関数を定義 *)
     List.filter_map
       (function
-        | NodeA ((i, t), _, _, e, _) -> Some (generate_nodearray_update i e prg require_host_to_device_node)
+        | NodeA ((i, t), _, _, _, e) -> Some (generate_nodearray_update i e prg require_host_to_device_node)
         | _ -> None)
       ast.definitions
     |> Utils.concat_without_empty "\n\n"

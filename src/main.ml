@@ -32,13 +32,20 @@ let compile in_c : string =
   let lexbuf = from_channel in_c in
   try
     let ast : Syntax.ast = Parser.top Lexer.read lexbuf in
+    (* if not using GPU, gnode is translated to node array *)
+    let translated_gpu = ref false in
+    let message id = prerr_endline (id ^ " is declared as gnode, but translated to node array") in
+    let gnode_to_nodearray = function | Syntax.GNode (id, n, init, d, e) -> translated_gpu := true; message (fst id); Syntax.NodeA (id, n, init, d, e) | n -> n in
+    let ast : Syntax.ast = if !use_gpu then ast
+                           else { ast with definitions = List.map gnode_to_nodearray ast.definitions} in
+    let _ : unit = if !translated_gpu then prerr_endline "Warning : updating gnode on GPU requires gpu option (-gpu true)" in
     (* programはastからデータを構築.ここでデータは依存関係だったり... *)
     let program = Module.ast_to_program ast in
     (* debug *)
     (* Module.show_id_table program; *)
 
     (* C/C++のソースコード *)
-    let code : string = Codegen.code_of_ast ast program !thread in
+    let code : string = Codegen.code_of_ast ast program !thread !use_gpu in
 
     (* ユーザー設定の部分を含むコードを出力する *)
     User_setting.generate_user_setting_file !thread ast program;

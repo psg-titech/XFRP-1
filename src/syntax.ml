@@ -84,24 +84,15 @@ type expr =
   | ESelf
   | EConst of const
   | Eid of id
-  | EidA of id * expr (* Node Array or GPU Node *)
+  | EidA of id * expr * expr option (* Node Array or GPU Node *)
+  | EUnsafeidA of id * expr (* Array access without boundary check *)
   | EAnnot of id * annot
-  | EAnnotA of id * expr * annot
+  | EAnnotA of id * expr * annot * expr option
+  | EUnsafeAnnotA of id * expr * annot
   | Ebin of binop * expr * expr
   | EUni of uniop * expr
   | EApp of id * expr list
   | Eif of expr * expr * expr
-
-type gexpr =
-  | GSelf
-  | GConst of const (* 定数1,2,3とか *)
-  | Gid of id (* CPUノードに対する参照 *)
-  | GAnnot of id * annot
-  | GIdAt of id * gexpr (* ノード配列に対する参照. gnodeの右辺に出現するid[self+1]みたいなの *)
-  | GIdAtAnnot of id * gexpr * annot
-  | Gbin of binop * gexpr * gexpr
-  | GApp of id * gexpr list
-  | Gif of gexpr * gexpr * gexpr
 
 let rec string_of_expr = function
   | ESelf ->
@@ -110,12 +101,22 @@ let rec string_of_expr = function
       "EConst( " ^ string_of_const c ^ " )"
   | Eid i ->
       "Eid( " ^ i ^ ")"
-  | EidA (i, e) ->
+  | EidA (i, e, d) ->
       Printf.sprintf "EidA( %s , %s )" i (string_of_expr e)
+      ^ (match d with
+         | None -> ""
+         | Some d -> "?" ^ string_of_expr d)
+  | EUnsafeidA (i, e) ->
+      Printf.sprintf "EunsafeidA( %s , %s )" i (string_of_expr e)
   | EAnnot (id, an) ->
       "EAnnot(" ^ id ^ string_of_annot an ^ ")"
-  | EAnnotA (i, e, _) ->
+  | EAnnotA (i, e, _, d) ->
       Printf.sprintf "EAnnotA(%s, %s)" i (string_of_expr e)
+      ^ (match d with
+        | None -> ""
+        | Some d -> "?" ^ string_of_expr d)
+  | EUnsafeAnnotA (i, e, _) ->
+      Printf.sprintf "EUnsafeAnnotA(%s, %s)" i (string_of_expr e)
   | EUni (u, e) ->
       Printf.sprintf "EUni(%s, %s)" (string_of_uniop u) (string_of_expr e)
   | Ebin (op, e1, e2) ->
@@ -129,32 +130,9 @@ let rec string_of_expr = function
       "Eif{ cond =  " ^ string_of_expr cond ^ " }{ then = " ^ string_of_expr e1
       ^ "}{ else = " ^ string_of_expr e2 ^ "}"
 
-let rec string_of_gexpr = function
-  | GSelf -> "Self"
-  | GConst c ->
-      "EConst( " ^ string_of_const c ^ " )"
-  | Gid i ->
-      "Eid( " ^ i ^ ")"
-  | GIdAt (i, idx) ->
-      Printf.sprintf "GIdAt(%s , %s)" i (string_of_gexpr idx)
-  | GIdAtAnnot (i, idx, _) ->
-      Printf.sprintf "GIdAtAnnot(%s , %s)" i (string_of_gexpr idx)
-  | Gbin (op, e1, e2) ->
-      "Ebin (" ^ string_of_binop op ^ "){ " ^ string_of_gexpr e1 ^ " op "
-      ^ string_of_gexpr e2 ^ " }"
-  | GApp (i, es) ->
-      "EApp(" ^ i ^ " , "
-      ^ String.concat "," (List.map string_of_gexpr es)
-      ^ ")"
-  | Gif (cond, e1, e2) ->
-      "Eif{ cond =  " ^ string_of_gexpr cond ^ " }{ then = "
-      ^ string_of_gexpr e1 ^ "}{ else = " ^ string_of_gexpr e2 ^ "}"
-  | GAnnot (id, an) ->
-      "EAnnot(" ^ id ^ string_of_annot an ^ ")"
-
 type definition =
   | Node of id_and_type * expr option (* init *) * expr
-  | NodeA of id_and_type * int * expr option * expr * const
+  | NodeA of id_and_type * int * expr option * const * expr
   | GNode of  id_and_type *
               int (* array size *) *
               expr option (* init *) *
@@ -178,8 +156,12 @@ let string_of_definition = function
   | GNode (it, n, None, def, e) ->
       "GNode {\n\t" ^ string_of_id_and_type it ^ " ,\n\tinit = " ^ "NONE"
       ^ "\n\texpr = " ^ string_of_expr e ^ "\n}"
-  | NodeA _ ->
-      "NodeA is notimplmented"
+  | NodeA (it, n, Some ie, def, e) ->
+      "GNode {\n\t" ^ string_of_id_and_type it ^ " ,\n\tinit = "
+      ^ string_of_expr ie ^ "\n\texpr = " ^ string_of_expr e ^ "\n}"
+  | NodeA (it, n, None, def, e) ->
+      "GNode {\n\t" ^ string_of_id_and_type it ^ " ,\n\tinit = " ^ "NONE"
+      ^ "\n\texpr = " ^ string_of_expr e ^ "\n}"
   | Func _ -> 
       "Func is not implemented"
 

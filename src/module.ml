@@ -64,7 +64,7 @@ let construct_nodeinfo_table (ast : Syntax.ast)
             | Node ((name,t),_,_) ->
                 let id = Hashtbl.find id_table name in
                 Hashtbl.add table id { name; t; number=1; default=None; }
-            | NodeA ((name,t),number,_,_,c) -> 
+            | NodeA ((name,t),number,_,c,_) -> 
                 let id = Hashtbl.find id_table name in
                 Hashtbl.add table id { name; t; number; default=Some(c); }
             | GNode ((name,t), number, _, c, _) -> 

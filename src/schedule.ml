@@ -23,13 +23,31 @@ let construct_graph (ast : Syntax.ast) (program : Module.program) : (int,IntSet.
   (* The function that collects the set of id. *)
   let rec collect_nodeid expr =
     match expr with
-    | ESelf | EConst _ | EAnnot _ | EAnnotA _ ->
+    | ESelf | EConst _ | EAnnot _ ->
         IntSet.empty
     | Eid i ->
         if List.mem i program.input
           then IntSet.empty
           else Hashtbl.find program.id_table i |> IntSet.singleton
-    | EidA (i, e) ->
+    | EidA (i, e, d) ->
+        let index_set = collect_nodeid e in
+        let set1 =
+          if List.mem i program.input
+            then IntSet.empty
+            else let id1 = Hashtbl.find program.id_table i in IntSet.singleton id1
+        in
+        let set1 =
+          match d with
+          | None -> set1
+          | Some d -> IntSet.union set1 (collect_nodeid d) in
+        IntSet.union set1 index_set
+    | EAnnotA (_, e, _, d) ->
+        let index_set = collect_nodeid e in
+        let set1 = (match d with
+                    | None -> IntSet.empty
+                    | Some d -> collect_nodeid d) in
+        IntSet.union set1 index_set
+    | EUnsafeidA (i, e) ->
         let index_set = collect_nodeid e in
         let set1 =
           if List.mem i program.input
@@ -37,6 +55,7 @@ let construct_graph (ast : Syntax.ast) (program : Module.program) : (int,IntSet.
             else let id1 = Hashtbl.find program.id_table i in IntSet.singleton id1
         in
         IntSet.union set1 index_set
+    | EUnsafeAnnotA (_, e, _) -> collect_nodeid e
     | Ebin (_, e1, e2) ->
         IntSet.union (collect_nodeid e1) (collect_nodeid e2)
     | EUni (_, e) ->
@@ -49,28 +68,6 @@ let construct_graph (ast : Syntax.ast) (program : Module.program) : (int,IntSet.
         IntSet.union (collect_nodeid cond)
           (IntSet.union (collect_nodeid e1) (collect_nodeid e2))
   in
-  let rec collect_gnodeid gexpr = 
-    match gexpr with
-    | GSelf -> IntSet.empty
-    | GConst _ -> IntSet.empty
-    (* CPUノード *)
-    | Gid nodename ->
-        if List.mem nodename program.input then IntSet.empty
-        else Hashtbl.find program.id_table nodename|> IntSet.singleton
-    (* CPUノード+@last *)
-    | GAnnot _ -> IntSet.empty
-    (* ノード配列に対する参照 *)
-    | GIdAt (nodesymbol, ge_index) -> 
-        let id =
-          if (List.mem nodesymbol program.input) then IntSet.empty
-            else Hashtbl.find program.id_table nodesymbol |> IntSet.singleton in
-        let index_set = collect_gnodeid ge_index in
-        IntSet.union id index_set
-    | GIdAtAnnot _ -> IntSet.empty
-    | Gbin (op, ge1, ge2) -> IntSet.union (collect_gnodeid ge1) (collect_gnodeid ge2)
-    | GApp (funname, args) -> List.fold_left (fun acc ge -> IntSet.union acc (collect_gnodeid ge)) IntSet.empty args
-    | Gif (ge_if, ge_then, ge_else) -> IntSet.union (collect_gnodeid ge_if) (IntSet.union (collect_gnodeid ge_then) (collect_gnodeid ge_else))
-  in
 
   (* ptbl(親ノードの隣接リスト)を構築 *)
   List.iter
@@ -78,7 +75,7 @@ let construct_graph (ast : Syntax.ast) (program : Module.program) : (int,IntSet.
       | Node ((node, t), _, e) ->
           let id = Hashtbl.find program.id_table node in
           Hashtbl.add ptbl id (collect_nodeid e)
-      | NodeA ((node, t), _, _, e, _) ->
+      | NodeA ((node, t), _, _, _, e) ->
           let id = Hashtbl.find program.id_table node in
           Hashtbl.add ptbl id (collect_nodeid e)
       | GNode ((nodename,t), _, _, _, e) -> 
