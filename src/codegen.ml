@@ -480,9 +480,9 @@ let setup_code (ast : Syntax.ast) (prg : Module.program) (thread : int) (host_to
                   let tmp = get_unique_name () in
                   let preast, curast = expr_to_clang (Option.get init) prg in
                   let precode = code_of_c_ast preast 1 in
-                  let curcode = "\tint " ^ tmp ^ " = " ^ code_of_c_ast curast 0 ^ ";" in
+                  let curcode = "\t" ^ Type.of_string t ^ " " ^ tmp ^ " = " ^ code_of_c_ast curast 0 ^ ";" in
                   let ini_code =
-                    Printf.sprintf "\tcudaMemSet(%s[1],%s,sizeof(%s)*%d)" i tmp
+                    Printf.sprintf "\tcudaMemset(g_%s[1],%s,sizeof(%s)*%d);" i tmp
                       (Type.of_string t) n
                   in
                   Utils.concat_without_empty "\n" [precode ; curcode ; ini_code]
@@ -640,7 +640,7 @@ let create_loop_function (ast : Syntax.ast) (program : Module.program)(*{{{*)
     let head =
       let first_sync = if thread = 1 then "" else Printf.sprintf "\tsynchronization(%d);\n" i in
       (* loop関数の型・返り値をマクロで制御 *)
-      (if i=0 then "void loop(){\n" else ("LOOP_RETTYPE loop" ^ string_of_int i ^ "(LOOP_ARGS){\n")) ^ first_sync in
+      (if i=0 then "void loop(){\n" else ("LOOP_RETTYPE loop" ^ string_of_int i ^ "(LOOP_ARGS){\nwhile(1) {\n")) ^ first_sync in
     let body = 
       let concat_delm = if thread = 1 then "\n" else Printf.sprintf "\n\tsynchronization(%d);\n" i in
       List.init (max_fsd+1) (fun i -> max_fsd - i) |> 
@@ -649,7 +649,7 @@ let create_loop_function (ast : Syntax.ast) (program : Module.program)(*{{{*)
     in
     let tail = 
       let tail_sync = if thread = 1 then "" else Printf.sprintf "\n\tsynchronization(%d);" i in
-      let tail_ret  = if i = 0 then "" else "\n\treturn LOOP_RETVAL;" in
+      let tail_ret  = if i = 0 then "" else "\n}\n\treturn LOOP_RETVAL;" in
       tail_sync ^ tail_ret ^ "\n}" 
     in
     loop_functions.(i) <- head ^ body ^ tail
