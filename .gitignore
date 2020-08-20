@@ -23,5 +23,7 @@ setup.log
 # Merlin configuring file for Vim and Emacs
 .merlin
 
-# C
+# C/C++/CUDA
 *.c
+*.cc
+*.cu
