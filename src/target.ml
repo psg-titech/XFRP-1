@@ -165,6 +165,7 @@ let rec convert_cudaAST_to_code (ast : cudaAST) (indent : int) : string =
       let if_statement = tab ^ (Printf.sprintf "if(!!%s){" cond_var) in
       let then_st_pre = convert_cudaAST_to_code then_pre (indent+1) in
       let then_st_post = tab ^ Printf.sprintf "\t%s = %s;" res_var (convert_cudaAST_to_code then_post 0) in
+      let else_st = tab ^ "}else{" in
       let else_st_pre = convert_cudaAST_to_code else_pre (indent+1) in
       let else_st_post = tab ^ Printf.sprintf "\t%s = %s;" res_var (convert_cudaAST_to_code else_post 0) in
       Utils.concat_without_empty "\n"
@@ -174,9 +175,10 @@ let rec convert_cudaAST_to_code (ast : cudaAST) (indent : int) : string =
           if_statement;
           then_st_pre;
           then_st_post;
+          else_st;
           else_st_pre;
           else_st_post;
-          "}";
+          tab ^ "}";
         ]
   | CodeSeq codes -> 
       List.filter_map
